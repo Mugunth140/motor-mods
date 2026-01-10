@@ -37,7 +37,7 @@ export const productService = {
     const db = await getDb();
     await ensureProductsCategoryColumn(db);
     return await db.select<Product[]>(
-      "SELECT id, name, sku, category, price, quantity, updated_at FROM products ORDER BY name ASC"
+      "SELECT id, name, sku, category, price, purchase_price, quantity, reorder_level, barcode, updated_at FROM products ORDER BY name ASC"
     );
   },
 
@@ -49,7 +49,7 @@ export const productService = {
     const db = await getDb();
     await ensureProductsCategoryColumn(db);
     const result = await db.select<Product[]>(
-      "SELECT id, name, sku, category, price, quantity, updated_at FROM products WHERE id = $1",
+      "SELECT id, name, sku, category, price, purchase_price, quantity, reorder_level, barcode, updated_at FROM products WHERE id = $1",
       [id]
     );
     return result.length > 0 ? result[0] : null;
@@ -112,8 +112,8 @@ export const productService = {
     await ensureProductsCategoryColumn(db);
 
     await db.execute(
-      "UPDATE products SET name = $1, sku = $2, category = $3, price = $4, quantity = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6",
-      [product.name, product.sku, product.category, product.price, product.quantity, product.id]
+      "UPDATE products SET name = $1, sku = $2, category = $3, price = $4, quantity = $5, purchase_price = $6, reorder_level = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8",
+      [product.name, product.sku, product.category, product.price, product.quantity, product.purchase_price ?? 0, product.reorder_level ?? 5, product.id]
     );
   },
 

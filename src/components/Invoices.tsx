@@ -1,15 +1,17 @@
 import {
-  Calendar,
-  Clock,
-  DollarSign,
-  Eye,
-  FileText,
-  Package,
-  Printer,
-  Receipt,
-  Search,
-  TrendingUp,
-  User
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
+    Clock,
+    DollarSign,
+    Eye,
+    FileText,
+    Package,
+    Printer,
+    Receipt,
+    Search,
+    TrendingUp,
+    User
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoiceService } from "../db/invoiceService";
@@ -143,6 +145,10 @@ export const Invoices: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 300);
 
+  // Pagination
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState(1);
+
   // Stats
   const [stats, setStats] = useState({
     totalInvoices: 0,
@@ -178,6 +184,21 @@ export const Invoices: React.FC = () => {
       inv.id.toLowerCase().includes(search)
     );
   }, [invoices, debouncedSearch]);
+
+  // Reset page when search changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredInvoices.length / PAGE_SIZE));
+  }, [filteredInvoices.length]);
+
+  const pagedInvoices = useMemo(() => {
+    const safePage = Math.min(Math.max(page, 1), totalPages);
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filteredInvoices.slice(start, start + PAGE_SIZE);
+  }, [filteredInvoices, page, totalPages]);
 
   const handleViewInvoice = async (invoice: Invoice) => {
     setSelectedInvoice(invoice);
@@ -292,7 +313,7 @@ export const Invoices: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-auto custom-scrollbar">
-          {filteredInvoices.length === 0 ? (
+          {pagedInvoices.length === 0 ? (
             <EmptyState
               icon={Receipt}
               title={searchTerm ? "No invoices found" : "No invoices yet"}
@@ -312,7 +333,7 @@ export const Invoices: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInvoices.map((inv) => (
+                {pagedInvoices.map((inv) => (
                   <tr key={inv.id} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="p-4">
                       <div className="flex items-center gap-3">
@@ -348,7 +369,7 @@ export const Invoices: React.FC = () => {
                       </span>
                     </td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -378,6 +399,35 @@ export const Invoices: React.FC = () => {
             </table>
           )}
         </div>
+
+        {filteredInvoices.length > 0 && (
+          <div className="p-4 border-t border-slate-100 bg-white flex items-center justify-between">
+            <div className="text-sm text-slate-500">
+              Page <span className="font-semibold text-slate-700">{Math.min(page, totalPages)}</span> of{" "}
+              <span className="font-semibold text-slate-700">{totalPages}</span> ({filteredInvoices.length} invoices)
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                leftIcon={<ChevronLeft size={16} />}
+              >
+                Prev
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                leftIcon={<ChevronRight size={16} />}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Invoice Detail Modal */}

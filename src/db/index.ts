@@ -56,6 +56,7 @@ const ensureSchema = async (database: Database) => {
       product_id TEXT NOT NULL,
       quantity INTEGER NOT NULL,
       price REAL NOT NULL,
+      cost_price REAL NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(invoice_id) REFERENCES invoices(id),
       FOREIGN KEY(product_id) REFERENCES products(id)
@@ -227,6 +228,14 @@ const ensureSchema = async (database: Database) => {
     await database.execute("ALTER TABLE invoices ADD COLUMN return_reason TEXT");
   }
 
+  // Invoice Items table migrations
+  const invoiceItemCols = await database.select<{ name: string }[]>("PRAGMA table_info(invoice_items)");
+  const invoiceItemColNames = new Set(invoiceItemCols.map(c => c.name));
+
+  if (!invoiceItemColNames.has("cost_price")) {
+    await database.execute("ALTER TABLE invoice_items ADD COLUMN cost_price REAL NOT NULL DEFAULT 0");
+  }
+
   // Create any missing indexes
   await database.execute("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)");
   await database.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)");
@@ -257,18 +266,26 @@ const migrateProductsSkuNullable = async (database: Database) => {
       category TEXT,
       price REAL NOT NULL,
       quantity INTEGER NOT NULL DEFAULT 0,
+      barcode TEXT,
+      purchase_price REAL DEFAULT 0,
+      reorder_level INTEGER DEFAULT 5,
+      max_stock INTEGER,
+      last_sale_date TEXT,
+      fsn_classification TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
-    INSERT INTO products (id, name, sku, category, price, quantity, created_at, updated_at)
-    SELECT id, name, sku, NULL, price, quantity, created_at, updated_at
+    INSERT INTO products (id, name, sku, category, price, quantity, barcode, purchase_price, reorder_level, max_stock, last_sale_date, fsn_classification, created_at, updated_at)
+    SELECT id, name, sku, category, price, quantity, barcode, COALESCE(purchase_price, 0), COALESCE(reorder_level, 5), max_stock, last_sale_date, fsn_classification, created_at, updated_at
     FROM products_old;
 
     DROP TABLE products_old;
 
     CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
     CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+    CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+    CREATE INDEX IF NOT EXISTS idx_products_last_sale_date ON products(last_sale_date);
 
     COMMIT;
     PRAGMA foreign_keys=ON;

@@ -52,6 +52,7 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [invoiceSearch, setInvoiceSearch] = useState("");
     const [invoices, setInvoices] = useState<Invoice[]>([]);
+    const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
     const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
     const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
     const [selectedItems, setSelectedItems] = useState<Map<string, number>>(new Map());
@@ -97,6 +98,7 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
         } finally {
             setLoading(false);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [page, fromDate, toDate]);
 
     useEffect(() => {
@@ -131,7 +133,7 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
     };
 
     const openCreateModal = async () => {
-        await loadInvoices();
+        setIsLoadingInvoices(true);
         setShowCreateModal(true);
         setSelectedInvoice(null);
         setInvoiceItems([]);
@@ -139,6 +141,14 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
         setReturnReason("customer_request");
         setReturnNotes("");
         setInvoiceSearch("");
+        try {
+            await loadInvoices();
+        } catch (error) {
+            console.error(error);
+            toast.error("Error", "Failed to load invoices");
+        } finally {
+            setIsLoadingInvoices(false);
+        }
     };
 
     const closeCreateModal = () => {
@@ -464,7 +474,7 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
                                         <td className="p-4 font-semibold text-slate-800">₹{ret.total_amount.toLocaleString()}</td>
                                         <td className="p-4">{getStatusBadge(ret.status)}</td>
                                         <td className="p-4 text-right">
-                                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="flex items-center justify-end gap-1">
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
@@ -542,7 +552,18 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
                                 leftIcon={<Search size={18} />}
                             />
                             <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl">
-                                {invoices
+                                {isLoadingInvoices ? (
+                                    <div className="flex items-center justify-center py-8">
+                                        <div className="w-6 h-6 border-3 border-teal-600 border-t-transparent rounded-full animate-spin" />
+                                        <span className="ml-2 text-slate-500">Loading invoices...</span>
+                                    </div>
+                                ) : invoices.length === 0 ? (
+                                    <div className="text-center py-8 text-slate-500">
+                                        <FileText size={32} className="mx-auto mb-2 text-slate-300" />
+                                        <p>No invoices found</p>
+                                        <p className="text-sm">Create an invoice first to process returns</p>
+                                    </div>
+                                ) : invoices
                                     .filter(inv => {
                                         if (!invoiceSearch) return true;
                                         const search = invoiceSearch.toLowerCase();

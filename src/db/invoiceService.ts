@@ -69,9 +69,12 @@ export const invoiceService = {
       else invoices.push(nextInvoice);
 
       for (const item of items) {
+        const product = byId.get(item.product_id);
+        const costPrice = product?.purchase_price ?? 0;
         const nextItem: InvoiceItem = {
           ...item,
           invoice_id: invoice.id,
+          cost_price: item.cost_price ?? costPrice,
         };
         const itemIdx = invoiceItems.findIndex((x) => x.id === item.id);
         if (itemIdx >= 0) invoiceItems[itemIdx] = nextItem;
@@ -97,13 +100,16 @@ export const invoiceService = {
     const db = await getDb();
 
     // Stock validation (desktop)
+    const productCosts = new Map<string, number>();
     for (const item of items) {
-      const rows = await db.select<{ quantity: number; name: string }[]>(
-        "SELECT quantity, name FROM products WHERE id = $1",
+      const rows = await db.select<{ quantity: number; name: string; purchase_price: number }[]>(
+        "SELECT quantity, name, purchase_price FROM products WHERE id = $1",
         [item.product_id]
       );
       const available = rows[0]?.quantity ?? 0;
       const name = rows[0]?.name ?? item.product_id;
+      const purchasePrice = rows[0]?.purchase_price ?? 0;
+      productCosts.set(item.product_id, purchasePrice);
       if (available < item.quantity) {
         throw new Error(`Insufficient stock for ${name}. Available ${available}, requested ${item.quantity}.`);
       }
@@ -112,15 +118,17 @@ export const invoiceService = {
     // Start a transaction if possible, but tauri-plugin-sql handles simple queries.
     // We'll run them sequentially for now.
 
+    const createdAt = invoice.created_at || new Date().toISOString();
     await db.execute(
-      "INSERT INTO invoices (id, customer_name, customer_phone, discount_amount, total_amount) VALUES ($1, $2, $3, $4, $5)",
-      [invoice.id, invoice.customer_name, invoice.customer_phone ?? null, invoice.discount_amount ?? 0, invoice.total_amount]
+      "INSERT INTO invoices (id, customer_name, customer_phone, discount_amount, total_amount, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+      [invoice.id, invoice.customer_name, invoice.customer_phone ?? null, invoice.discount_amount ?? 0, invoice.total_amount, createdAt]
     );
 
     for (const item of items) {
+      const costPrice = item.cost_price ?? productCosts.get(item.product_id) ?? 0;
       await db.execute(
-        "INSERT INTO invoice_items (id, invoice_id, product_id, quantity, price) VALUES ($1, $2, $3, $4, $5)",
-        [item.id, invoice.id, item.product_id, item.quantity, item.price]
+        "INSERT INTO invoice_items (id, invoice_id, product_id, quantity, price, cost_price) VALUES ($1, $2, $3, $4, $5, $6)",
+        [item.id, invoice.id, item.product_id, item.quantity, item.price, costPrice]
       );
 
       // Deduct stock and log adjustment
@@ -155,6 +163,7 @@ export const invoiceService = {
       const byId = new Map(products.map((p) => [p.id, p] as const));
       return items.map((it) => ({
         ...it,
+        cost_price: it.cost_price ?? 0,
         product_name: byId.get(it.product_id)?.name,
       }));
     }
@@ -166,6 +175,7 @@ export const invoiceService = {
         ii.product_id, 
         ii.quantity, 
         ii.price,
+        COALESCE(ii.cost_price, 0) as cost_price,
         p.name as product_name
       FROM invoice_items ii
       LEFT JOIN products p ON ii.product_id = p.id
@@ -229,6 +239,128 @@ export const invoiceService = {
       totalRevenue: totalResult[0]?.total ?? 0,
       todayRevenue: todayResult[0]?.total ?? 0,
       thisMonthCount: monthResult[0]?.count ?? 0,
+    };
+  },
+
+  async getProfitStats(): Promise<{
+    todayProfit: number;
+    todayRevenue: number;
+    todayCost: number;
+    thisMonthProfit: number;
+    thisMonthRevenue: number;
+    thisMonthCost: number;
+    yesterdayProfit: number;
+    lastMonthProfit: number;
+  }> {
+    if (!isTauriRuntime()) {
+      const invoices = loadInvoices();
+      const invoiceItems = loadInvoiceItems();
+      
+      const now = new Date();
+      const todayKey = now.toDateString();
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+      let todayRevenue = 0, todayCost = 0;
+      let yesterdayRevenue = 0, yesterdayCost = 0;
+      let thisMonthRevenue = 0, thisMonthCost = 0;
+      let lastMonthRevenue = 0, lastMonthCost = 0;
+
+      for (const inv of invoices) {
+        const invDate = new Date(inv.created_at);
+        const invDateStr = invDate.toDateString();
+        const items = invoiceItems.filter(it => it.invoice_id === inv.id);
+        const revenue = inv.total_amount ?? 0;
+        const cost = items.reduce((sum, it) => sum + ((it.cost_price ?? 0) * it.quantity), 0);
+
+        if (invDateStr === todayKey) {
+          todayRevenue += revenue;
+          todayCost += cost;
+        }
+        if (invDateStr === yesterday) {
+          yesterdayRevenue += revenue;
+          yesterdayCost += cost;
+        }
+        if (invDate >= monthStart) {
+          thisMonthRevenue += revenue;
+          thisMonthCost += cost;
+        }
+        if (invDate >= lastMonthStart && invDate <= lastMonthEnd) {
+          lastMonthRevenue += revenue;
+          lastMonthCost += cost;
+        }
+      }
+
+      return {
+        todayProfit: todayRevenue - todayCost,
+        todayRevenue,
+        todayCost,
+        thisMonthProfit: thisMonthRevenue - thisMonthCost,
+        thisMonthRevenue,
+        thisMonthCost,
+        yesterdayProfit: yesterdayRevenue - yesterdayCost,
+        lastMonthProfit: lastMonthRevenue - lastMonthCost,
+      };
+    }
+
+    const db = await getDb();
+
+    // Today's stats
+    const todayResult = await db.select<{ revenue: number; cost: number }[]>(`
+      SELECT 
+        COALESCE(SUM(i.total_amount), 0) as revenue,
+        COALESCE(SUM(ii.cost_price * ii.quantity), 0) as cost
+      FROM invoices i
+      LEFT JOIN invoice_items ii ON i.id = ii.invoice_id
+      WHERE date(i.created_at) = date('now')
+    `);
+
+    // Yesterday's stats
+    const yesterdayResult = await db.select<{ revenue: number; cost: number }[]>(`
+      SELECT 
+        COALESCE(SUM(i.total_amount), 0) as revenue,
+        COALESCE(SUM(ii.cost_price * ii.quantity), 0) as cost
+      FROM invoices i
+      LEFT JOIN invoice_items ii ON i.id = ii.invoice_id
+      WHERE date(i.created_at) = date('now', '-1 day')
+    `);
+
+    // This month's stats
+    const monthResult = await db.select<{ revenue: number; cost: number }[]>(`
+      SELECT 
+        COALESCE(SUM(i.total_amount), 0) as revenue,
+        COALESCE(SUM(ii.cost_price * ii.quantity), 0) as cost
+      FROM invoices i
+      LEFT JOIN invoice_items ii ON i.id = ii.invoice_id
+      WHERE strftime('%Y-%m', i.created_at) = strftime('%Y-%m', 'now')
+    `);
+
+    // Last month's stats
+    const lastMonthResult = await db.select<{ revenue: number; cost: number }[]>(`
+      SELECT 
+        COALESCE(SUM(i.total_amount), 0) as revenue,
+        COALESCE(SUM(ii.cost_price * ii.quantity), 0) as cost
+      FROM invoices i
+      LEFT JOIN invoice_items ii ON i.id = ii.invoice_id
+      WHERE strftime('%Y-%m', i.created_at) = strftime('%Y-%m', 'now', '-1 month')
+    `);
+
+    const todayRevenue = todayResult[0]?.revenue ?? 0;
+    const todayCost = todayResult[0]?.cost ?? 0;
+    const thisMonthRevenue = monthResult[0]?.revenue ?? 0;
+    const thisMonthCost = monthResult[0]?.cost ?? 0;
+
+    return {
+      todayProfit: todayRevenue - todayCost,
+      todayRevenue,
+      todayCost,
+      thisMonthProfit: thisMonthRevenue - thisMonthCost,
+      thisMonthRevenue,
+      thisMonthCost,
+      yesterdayProfit: (yesterdayResult[0]?.revenue ?? 0) - (yesterdayResult[0]?.cost ?? 0),
+      lastMonthProfit: (lastMonthResult[0]?.revenue ?? 0) - (lastMonthResult[0]?.cost ?? 0),
     };
   },
 

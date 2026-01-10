@@ -1,14 +1,14 @@
 import {
-  AlertTriangle,
-  BarChart3,
-  Edit2,
-  Package,
-  Plus,
-  Save,
-  Search,
-  Trash2,
-  TrendingUp,
-  X
+    AlertTriangle,
+    BarChart3,
+    Edit2,
+    Package,
+    Plus,
+    Save,
+    Search,
+    Trash2,
+    TrendingUp,
+    X
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -226,7 +226,9 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
           sku: formData.sku.trim() || null,
           category: formData.category.trim() || null,
           price: parseFloat(formData.price) || 0,
+          purchase_price: parseFloat(formData.purchase_price) || 0,
           quantity: parseInt(formData.quantity) || 0,
+          reorder_level: parseInt(formData.reorder_level) || 5,
         });
         toast.success("Product Updated", `${formData.name} has been updated successfully`);
       } else {
@@ -237,7 +239,9 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
           sku: formData.sku.trim() || null,
           category: formData.category.trim() || null,
           price: parseFloat(formData.price) || 0,
+          purchase_price: parseFloat(formData.purchase_price) || 0,
           quantity: parseInt(formData.quantity) || 0,
+          reorder_level: parseInt(formData.reorder_level) || 5,
         });
         toast.success("Product Added", `${formData.name} has been added to inventory`);
       }
@@ -443,7 +447,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
                     <td className="p-4 font-bold text-slate-700">₹{p.price.toLocaleString()}</td>
                     <td className="p-4">{getStockBadge(p.quantity)}</td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -547,7 +551,18 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
 
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label="Price (₹)"
+              label="Cost Price (₹)"
+              type="number"
+              placeholder="0.00"
+              value={formData.purchase_price}
+              onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })}
+              step="0.01"
+              min="0"
+              required
+            />
+
+            <Input
+              label="Selling Price (₹)"
               type="number"
               placeholder="0.00"
               value={formData.price}
@@ -556,7 +571,9 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
               min="0"
               required
             />
+          </div>
 
+          <div className="grid grid-cols-2 gap-4">
             <Input
               label="Quantity"
               type="number"
@@ -565,6 +582,15 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
               onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
               min="0"
               required
+            />
+
+            <Input
+              label="Reorder Level"
+              type="number"
+              placeholder="5"
+              value={formData.reorder_level}
+              onChange={(e) => setFormData({ ...formData, reorder_level: e.target.value })}
+              min="0"
             />
           </div>
 

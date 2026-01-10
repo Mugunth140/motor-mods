@@ -30,25 +30,35 @@ export const backupService = {
 
     try {
       if (isTauriRuntime()) {
+        // The Rust command returns the backup filename
         const result = await invoke<string>("backup_database");
-        console.log("Backup success:", result);
+        console.log("Backup created:", result);
         backupFile = result;
       }
     } catch (error) {
       console.error("Backup failed:", error);
       status = 'failed';
-      throw error;
-    } finally {
-      // Log the backup attempt
+      // Still log the failed attempt
       await this.logBackup({
         backup_file: backupFile,
         backup_date: backupDate,
         backup_type: type,
         file_size: fileSize,
         status,
-        notes: status === 'failed' ? 'Backup failed' : null,
+        notes: error instanceof Error ? error.message : 'Backup failed',
       });
+      throw error;
     }
+
+    // Log successful backup
+    await this.logBackup({
+      backup_file: backupFile,
+      backup_date: backupDate,
+      backup_type: type,
+      file_size: fileSize,
+      status,
+      notes: null,
+    });
 
     return backupFile;
   },

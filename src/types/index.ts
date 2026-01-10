@@ -46,6 +46,7 @@ export interface InvoiceItem {
   product_name?: string;
   quantity: number;
   price: number;
+  cost_price: number;
 }
 
 export interface InvoiceWithItems extends Invoice {

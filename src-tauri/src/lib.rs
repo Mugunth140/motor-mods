@@ -23,13 +23,14 @@ fn backup_database(app: AppHandle) -> Result<String, String> {
         fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
     }
 
-    let date_str = Local::now().format("%Y-%m-%d").to_string();
-    let backup_filename = format!("motormods_{}.db", date_str);
+    // Use timestamp format matching frontend expectation
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let backup_filename = format!("motormods_backup_{}.db", timestamp);
     let backup_path = backups_dir.join(&backup_filename);
 
     // Perform copy
     match fs::copy(&db_path, &backup_path) {
-        Ok(_) => Ok(format!("Backup created at: {:?}", backup_path)),
+        Ok(_) => Ok(backup_filename), // Return just the filename
         Err(e) => Err(format!("Failed to backup database: {}", e)),
     }
 }

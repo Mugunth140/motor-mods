@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from "lucide-react";
-import React, { createContext, useCallback, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 type ToastType = "success" | "error" | "warning" | "info";
 
@@ -83,8 +83,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [addToast]
   );
 
+  const contextValue = useMemo(
+    () => ({ toasts, addToast, removeToast, success, error, warning, info }),
+    [toasts, addToast, removeToast, success, error, warning, info]
+  );
+
   return (
-    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, warning, info }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <ToastContainer toasts={toasts} removeToast={removeToast} />
     </ToastContext.Provider>
@@ -96,7 +101,7 @@ const ToastContainer: React.FC<{ toasts: Toast[]; removeToast: (id: string) => v
   removeToast,
 }) => {
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed bottom-4 right-4 z-100 flex flex-col gap-3 pointer-events-none">
       {toasts.map((toast) => (
         <div
           key={toast.id}

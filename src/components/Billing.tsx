@@ -1,16 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Check,
-  CreditCard,
-  Keyboard,
-  Minus,
-  Package,
-  Plus,
-  Search,
-  ShoppingCart,
-  Trash2,
-  User,
-  X
+    Check,
+    CreditCard,
+    Keyboard,
+    Minus,
+    Package,
+    Plus,
+    Search,
+    ShoppingCart,
+    Trash2,
+    User,
+    X
 } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -192,6 +192,7 @@ export const Billing: React.FC = () => {
       product_id: item.id,
       quantity: item.cartQuantity,
       price: item.price,
+      cost_price: item.purchase_price ?? 0,
     }));
 
     try {
@@ -355,7 +356,7 @@ export const Billing: React.FC = () => {
                       </Badge>
                     </div>
 
-                    <div className="flex-1 min-h-[3rem]">
+                    <div className="flex-1 min-h-12">
                       <h3 className="font-bold text-slate-800 line-clamp-2 leading-snug mb-1 group-hover:text-indigo-700 transition-colors">{p.name}</h3>
                       <p className="text-xs text-slate-400 font-mono tracking-wide">{p.sku || "NO SKU"}</p>
                     </div>

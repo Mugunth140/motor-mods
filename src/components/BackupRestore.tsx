@@ -50,6 +50,7 @@ export const BackupRestore: React.FC = () => {
         } finally {
             setLoading(false);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
@@ -203,7 +204,7 @@ export const BackupRestore: React.FC = () => {
                             </Button>
                         </div>
 
-                        <div className="border border-slate-200 rounded-xl overflow-hidden flex-1 overflow-auto custom-scrollbar">
+                        <div className="border border-slate-200 rounded-xl overflow-auto flex-1 custom-scrollbar">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50 sticky top-0">
                                     <tr>
@@ -284,7 +285,7 @@ export const BackupRestore: React.FC = () => {
                                         onChange={(e) => updateSetting("auto_backup_enabled", e.target.checked)}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                                 </label>
                             </div>
 

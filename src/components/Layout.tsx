@@ -1,17 +1,17 @@
 import {
-  BarChart3,
-  Bell,
-  ChevronLeft, ChevronRight,
-  Database,
-  HardDrive,
-  LayoutDashboard,
-  LogOut,
-  Package,
-  Receipt,
-  RotateCcw,
-  Settings,
-  ShoppingCart,
-  WifiOff
+    BarChart3,
+    Bell,
+    ChevronLeft, ChevronRight,
+    Database,
+    HardDrive,
+    LayoutDashboard,
+    LogOut,
+    Package,
+    Receipt,
+    RotateCcw,
+    Settings,
+    ShoppingCart,
+    WifiOff
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { notificationService } from "../db/notificationService";
@@ -270,7 +270,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                         </button>
                       </div>
 
-                      <div className="max-h-[320px] overflow-auto custom-scrollbar">
+                      <div className="max-h-80 overflow-auto custom-scrollbar">
                         {inboxItems.length === 0 ? (
                           <div className="p-8 text-center text-slate-400 flex flex-col items-center gap-2">
                             <Bell size={20} className="opacity-20" />
