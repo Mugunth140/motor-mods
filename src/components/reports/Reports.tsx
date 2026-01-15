@@ -443,7 +443,13 @@ export const Reports: React.FC<{ intent?: ReportIntent | null }> = ({ intent }) 
                   <option value="amount">Amount</option>
                 </select>
               </div>
-              <Button onClick={runReport} isLoading={isLoading} className="h-11 px-6 shadow-indigo-100">
+              <Button
+                onClick={runReport}
+                isLoading={isLoading}
+                disabled={canUseDateRange && (!from || !to)}
+                title={canUseDateRange && (!from || !to) ? "Please select both From and To dates" : "Generate Report"}
+                className={`h-11 px-6 shadow-indigo-100 ${canUseDateRange && (!from || !to) ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
                 Generate
               </Button>
             </div>

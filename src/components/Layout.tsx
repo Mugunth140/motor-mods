@@ -68,7 +68,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
           {!sidebarCollapsed && (
             <div className="overflow-hidden">
               <span className="text-lg font-bold text-white tracking-tight block">MotorMods</span>
-              <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Performance Billing</p>
+              <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Billing & Inventory</p>
             </div>
           )}
         </div>

@@ -72,7 +72,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <div className="relative z-10">
             <img src="/logo.png" alt="MotorMods" className="w-16 h-16 object-contain mb-6 drop-shadow-lg bg-white rounded-2xl p-2.5" />
             <h1 className="text-3xl font-bold text-white tracking-tight mb-2">MotorMods</h1>
-            <p className="text-slate-400 text-sm font-medium tracking-wide uppercase opacity-80">Performance Billing</p>
+            <p className="text-slate-400 text-sm font-medium tracking-wide uppercase opacity-80">Billing & Inventory</p>
           </div>
 
           <div className="relative z-10 space-y-4">

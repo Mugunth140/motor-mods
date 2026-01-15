@@ -67,7 +67,7 @@ const AnimatedCounter: React.FC<{ value: number; prefix?: string; suffix?: strin
         };
 
         animationId = requestAnimationFrame(animate);
-        
+
         // Cleanup: cancel animation on unmount or value change
         return () => {
             if (animationId) {
@@ -114,22 +114,29 @@ const SimpleBarChart: React.FC<{
     }, [animated, data]);
 
     const maxValue = Math.max(...data.map(d => d.value), 1);
+    const labelSpace = 25; // Reserve space for label + gap
+    const maxBarHeight = Math.max(0, height - labelSpace);
 
     return (
         <div className="flex items-end justify-between gap-2" style={{ height }}>
             {data.map((item, index) => {
-                const barHeight = (item.value / maxValue) * height * animationProgress;
+                const barHeight = (item.value / maxValue) * maxBarHeight * animationProgress;
                 return (
                     <div key={index} className="flex flex-col items-center flex-1 gap-1">
                         <div
-                            className="w-full rounded-t-lg transition-all duration-300"
+                            className="w-full rounded-t-lg transition-all duration-300 relative group"
                             style={{
                                 height: barHeight,
                                 backgroundColor: item.color || '#6366f1',
                                 minHeight: item.value > 0 ? 4 : 0
                             }}
-                        />
-                        <span className="text-xs text-slate-500 font-medium truncate w-full text-center">
+                        >
+                            {/* Tooltip */}
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                                {item.value}
+                            </div>
+                        </div>
+                        <span className="text-xs text-slate-500 font-medium truncate w-full text-center h-5">
                             {item.label}
                         </span>
                     </div>
@@ -143,7 +150,10 @@ const SimpleBarChart: React.FC<{
 const DonutChart: React.FC<{
     data: { label: string; value: number; color: string }[];
     size?: number;
-}> = ({ data, size = 140 }) => {
+    showLegend?: boolean;
+    customTotal?: number | string;
+    customLabel?: string;
+}> = ({ data, size = 140, showLegend = true, customTotal, customLabel }) => {
     const [animationProgress, setAnimationProgress] = useState(0);
     const total = data.reduce((sum, d) => sum + d.value, 0);
     const strokeWidth = 24;
@@ -198,19 +208,23 @@ const DonutChart: React.FC<{
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
                     <div className="text-center">
-                        <div className="text-xl font-bold text-slate-800">{total}</div>
-                        <div className="text-xs text-slate-500">Total</div>
+                        <div className="text-center">
+                            <div className="text-xl font-bold text-slate-800">{customTotal ?? total}</div>
+                            <div className="text-xs text-slate-500">{customLabel ?? "Total"}</div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center">
-                {data.map((item, index) => (
-                    <div key={index} className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                        <span className="text-xs text-slate-600">{item.label}</span>
-                    </div>
-                ))}
-            </div>
+            {showLegend && (
+                <div className="flex flex-wrap gap-2 justify-center">
+                    {data.map((item, index) => (
+                        <div key={index} className="flex items-center gap-1">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                            <span className="text-xs text-slate-600">{item.label}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
@@ -388,6 +402,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 value,
                 color: colors[index % colors.length]
             }));
+    }, [products]);
+
+    // Total categories count
+    const totalCategories = useMemo(() => {
+        const categories = new Set(products.map(p => p.category || "Uncategorized"));
+        return categories.size;
     }, [products]);
 
     // Weekly sales data for bar chart
@@ -597,7 +617,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             By Category
                         </h3>
                         {categoryData.length > 0 ? (
-                            <DonutChart data={categoryData} size={120} />
+                            <DonutChart
+                                data={categoryData}
+                                size={120}
+                                showLegend={false}
+                                customTotal={totalCategories}
+                                customLabel="Categories"
+                            />
                         ) : (
                             <div className="flex items-center justify-center h-32 text-slate-400">
                                 <p>No categories yet</p>
