@@ -18,6 +18,7 @@ import { getDb } from "../db/index";
 import { isTauriRuntime } from "../db/runtime";
 import { settingsService } from "../db/settingsService";
 import { User, userService } from "../db/userService";
+import { seedService } from "../db/seedService";
 import { AppSettings, LowStockMethod } from "../types";
 import { Badge, Button, ConfirmModal, Input, useToast } from "./ui";
 
@@ -34,6 +35,7 @@ export const Settings: React.FC = () => {
     const [clearing, setClearing] = useState(false);
     const [clearConfirm, setClearConfirm] = useState(false);
     const [seedConfirm, setSeedConfirm] = useState(false);
+    const [hugeSeedConfirm, setHugeSeedConfirm] = useState(false);
 
     // User Management State
     const [users, setUsers] = useState<User[]>([]);
@@ -107,6 +109,33 @@ export const Settings: React.FC = () => {
         { id: "users", label: "Users", icon: Users },
         { id: "developer", label: "Developer", icon: Code2 },
     ];
+
+    const handleSeedHugeData = async () => {
+        setHugeSeedConfirm(false);
+        setSeeding(true);
+        try {
+            if (!isTauriRuntime()) {
+                toast.error("Error", "Seeding only works in desktop app");
+                setSeeding(false);
+                return;
+            }
+
+            await seedService.seedHugeData((msg) => {
+                // We can use a toast or just let it spin. 
+                // For now, let's just log or maybe show a loading toast if possible? 
+                // Actually, let's just use console for progress to keep UI clean, 
+                // but the button will show loading.
+                console.log(msg);
+            });
+
+            toast.success("Huge Data Database Seeded", "Created 500+ products and ~2,000 invoices.");
+        } catch (error) {
+            console.error("Seed error:", error);
+            toast.error("Seed Failed", error instanceof Error ? error.message : "Could not seed database");
+        } finally {
+            setSeeding(false);
+        }
+    };
 
     const handleSeedDatabase = async () => {
         setSeedConfirm(false);
@@ -576,6 +605,28 @@ export const Settings: React.FC = () => {
                                 </div>
                             </div>
 
+                            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 mb-6">
+                                <div className="flex items-start gap-4">
+                                    <div className="p-3 bg-indigo-100 rounded-xl text-indigo-600">
+                                        <Database size={24} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h4 className="font-bold text-indigo-900 mb-2">Seed Huge Data</h4>
+                                        <p className="text-sm text-indigo-800 mb-4">
+                                            Populate with massive dataset (500 products, 2000+ invoices) for performance testing.
+                                        </p>
+                                        <Button
+                                            onClick={() => setHugeSeedConfirm(true)}
+                                            isLoading={seeding}
+                                            leftIcon={<Wand2 size={18} />}
+                                            className="bg-indigo-600 hover:bg-indigo-700"
+                                        >
+                                            Seed Huge Data
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
                                 <div className="flex items-start gap-4">
                                     <div className="p-3 bg-red-100 rounded-xl text-red-600">
@@ -883,6 +934,17 @@ export const Settings: React.FC = () => {
                 message="This will permanently delete this user. They will no longer be able to log in. Continue?"
                 confirmText="Yes, Delete"
                 variant="danger"
+            />
+
+            {/* Huge Seed Confirmation Modal */}
+            <ConfirmModal
+                isOpen={hugeSeedConfirm}
+                onClose={() => setHugeSeedConfirm(false)}
+                onConfirm={handleSeedHugeData}
+                title="Seed Huge Data?"
+                message="This will add 500+ products and ~2,000 invoices to your database. This process may take a few seconds. Do you want to continue?"
+                confirmText="Yes, Seed Data"
+                variant="info"
             />
         </div>
     );
