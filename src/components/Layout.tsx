@@ -1,22 +1,20 @@
 import {
-    BarChart3,
-    Bell,
-    ChevronLeft, ChevronRight,
-    Database,
-    HardDrive,
-    LayoutDashboard,
-    LogOut,
-    Package,
-    Receipt,
-    RotateCcw,
-    Settings,
-    ShoppingCart,
-    WifiOff
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  HardDrive,
+  LayoutDashboard,
+  LogOut,
+  Package,
+  Receipt,
+  RotateCcw,
+  Settings,
+  ShoppingCart,
+  WifiOff
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
-import { notificationService } from "../db/notificationService";
 import { UserSession } from "../types";
-import { InboxNotification, ReportIntent } from "../types/notifications";
 import { Button } from "./ui";
 
 interface LayoutProps {
@@ -25,7 +23,6 @@ interface LayoutProps {
   setActiveTab: (tab: string) => void;
   session: UserSession;
   onLogout: () => void;
-  onReportIntent?: (intent: ReportIntent) => void;
 }
 
 const navItems = [
@@ -38,11 +35,8 @@ const navItems = [
   { id: "settings", label: "Settings", icon: Settings, description: "App configuration", adminOnly: true },
 ];
 
-export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, session, onLogout, onReportIntent }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, session, onLogout }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [inboxOpen, setInboxOpen] = useState(false);
-  const [inboxItems, setInboxItems] = useState<InboxNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const isAdmin = session.role === "admin";
 
@@ -59,39 +53,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
     };
   }, []);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    try {
-      notificationService.checkAndQueuePeriodNotifications();
-    } catch {
-      // ignore
-    }
-    refreshInbox();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]);
-
-  const refreshInbox = () => {
-    try {
-      const all = notificationService.getAll();
-      setInboxItems(all.slice(0, 20));
-      setUnreadCount(notificationService.getUnreadCount());
-    } catch {
-      setInboxItems([]);
-      setUnreadCount(0);
-    }
-  };
-
-  const openInbox = () => {
-    if (!isAdmin) return;
-    try {
-      notificationService.checkAndQueuePeriodNotifications();
-    } catch {
-      // ignore
-    }
-    refreshInbox();
-    setInboxOpen(true);
-  };
-
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans overflow-hidden">
       {/* Sidebar - Midnight Theme */}
@@ -103,7 +64,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
       >
         {/* Logo */}
         <div className="p-5 border-b border-slate-800 flex items-center gap-4">
-          <img src="/logo.png" alt="MotorMods Logo" className="w-10 h-10 shrink-0 object-contain" />
+          <img src="/logo.png" alt="MotorMods Logo" className="w-10 h-10 shrink-0 object-contain bg-white rounded-lg p-1.5 shadow-sm" />
           {!sidebarCollapsed && (
             <div className="overflow-hidden">
               <span className="text-lg font-bold text-white tracking-tight block">MotorMods</span>
@@ -197,7 +158,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                     <span className={`w-2 h-2 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)] ${isOnline ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-amber-500 shadow-amber-500/50'}`}></span>
                     <span className="text-xs font-medium text-slate-300">{isOnline ? 'System Online' : 'Offline Mode'}</span>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono">v0.1.0</span>
+                  <span className="text-[10px] text-slate-500 font-mono">v0.2.0</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-500">
                   {isOnline ? <HardDrive size={12} /> : <WifiOff size={12} />}
@@ -231,105 +192,33 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
             </p>
           </div>
 
-          <div className="flex items-center gap-6">
-            {/* User Actions Group */}
-            <div className="flex items-center p-1.5 bg-white border border-slate-200/80 rounded-full shadow-sm shadow-slate-200/50">
-              {/* Notifications */}
-              {isAdmin && (
-                <div className="relative">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="relative text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full w-9 h-9 transition-all"
-                    onClick={() => {
-                      if (inboxOpen) {
-                        setInboxOpen(false);
-                      } else {
-                        openInbox();
-                      }
-                    }}
-                    title="Inbox"
-                  >
-                    <Bell size={18} />
-                    {unreadCount > 0 && (
-                      <span className="absolute top-2 right-2.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
-                    )}
-                  </Button>
-
-                  {inboxOpen && (
-                    <div className="absolute right-0 mt-4 w-80 bg-white border border-slate-100 rounded-2xl shadow-xl shadow-slate-200/50 overflow-hidden z-50 ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-200 origin-top-right">
-                      <div className="px-4 py-3 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                        <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">Notifications</p>
-                        <button
-                          onClick={() => setInboxOpen(false)}
-                          className="text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors"
-                        >
-                          Close
-                        </button>
-                      </div>
-
-                      <div className="max-h-80 overflow-auto custom-scrollbar">
-                        {inboxItems.length === 0 ? (
-                          <div className="p-8 text-center text-slate-400 flex flex-col items-center gap-2">
-                            <Bell size={20} className="opacity-20" />
-                            <p className="text-xs">No new notifications</p>
-                          </div>
-                        ) : (
-                          inboxItems.map((n) => (
-                            <button
-                              key={n.id}
-                              className={
-                                "w-full text-left px-4 py-3 border-b border-slate-50 hover:bg-slate-50 transition-colors group relative " +
-                                (n.read ? "bg-white" : "bg-indigo-50/30")
-                              }
-                              onClick={() => {
-                                notificationService.markRead(n.id);
-                                refreshInbox();
-                                setInboxOpen(false);
-                                if (n.intent && onReportIntent) onReportIntent(n.intent);
-                                else if (n.intent) setActiveTab("reports");
-                              }}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className={`text-sm ${n.read ? 'font-medium text-slate-700' : 'font-bold text-slate-900'}`}>{n.title}</p>
-                                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.message}</p>
-                                </div>
-                                {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />}
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="w-px h-4 bg-slate-200 mx-1" />
-
-              {/* Profile */}
-              <div className="flex items-center gap-3 px-2">
-                <div className="text-right hidden md:block">
-                  <p className="text-sm font-bold text-slate-800 leading-none">{session.name}</p>
-                  <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mt-0.5">{session.role}</p>
-                </div>
-                <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center text-white text-sm font-bold shadow-md ring-2 ring-white">
-                  {session.name.charAt(0).toUpperCase()}
-                </div>
+          <div className="flex items-center gap-4">
+            {/* User Profile Section */}
+            <div className="flex items-center gap-3 pl-6 border-l border-slate-200/60">
+              <div className="flex flex-col items-end">
+                <span className="text-sm font-bold text-slate-800 leading-none">{session.name}</span>
+                <span className={`
+                  text-[9px] font-bold uppercase tracking-widest mt-1.5 px-2 py-0.5 rounded-md
+                  ${isAdmin ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'}
+                `}>
+                  {session.role}
+                </span>
               </div>
-
-              {/* Logout */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onLogout}
-                className="ml-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full w-9 h-9 transition-all"
-                title="Logout"
-              >
-                <LogOut size={16} />
-              </Button>
+              <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white text-base font-bold shadow-md ring-2 ring-white transition-transform hover:scale-105 duration-200">
+                {session.name.charAt(0).toUpperCase()}
+              </div>
             </div>
+
+            {/* Logout Action */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onLogout}
+              className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl w-10 h-10 transition-all border border-slate-100 hover:border-rose-200"
+              title="Logout"
+            >
+              <LogOut size={18} />
+            </Button>
           </div>
         </header>
 

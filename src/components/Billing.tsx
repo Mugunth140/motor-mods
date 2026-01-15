@@ -1,16 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-    Check,
-    CreditCard,
-    Keyboard,
-    Minus,
-    Package,
-    Plus,
-    Search,
-    ShoppingCart,
-    Trash2,
-    User,
-    X
+  Check,
+  CreditCard,
+  Keyboard,
+  Minus,
+  Package,
+  Plus,
+  Search,
+  ShoppingCart,
+  Trash2,
+  User,
+  X
 } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -303,7 +303,7 @@ export const Billing: React.FC = () => {
         </div>
 
         {/* Product Grid */}
-        <div className="flex-1 overflow-y-auto pr-2 pb-2 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 pt-2 custom-scrollbar">
           {filteredProducts.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50">
               <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-4">

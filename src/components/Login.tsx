@@ -61,7 +61,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <div className="absolute inset-0 bg-gradient-to-b from-slate-900/0 via-slate-900/60 to-slate-900/90" />
 
           <div className="relative z-10">
-            <img src="/logo.png" alt="MotorMods" className="w-16 h-16 object-contain mb-6 drop-shadow-lg" />
+            <img src="/logo.png" alt="MotorMods" className="w-16 h-16 object-contain mb-6 drop-shadow-lg bg-white rounded-2xl p-2.5" />
             <h1 className="text-3xl font-bold text-white tracking-tight mb-2">MotorMods</h1>
             <p className="text-slate-400 text-sm font-medium tracking-wide uppercase opacity-80">Performance Billing</p>
           </div>
@@ -192,7 +192,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       {/* Footer */}
       <div className="absolute bottom-6 text-center text-slate-600 text-xs">
-        <p>&copy; {new Date().getFullYear()} MotorMods System v0.1.0</p>
+        <p>&copy; {new Date().getFullYear()} MotorMods System v0.2.0</p>
       </div>
     </div>
   );

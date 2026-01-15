@@ -98,7 +98,7 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
         } finally {
             setLoading(false);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [page, fromDate, toDate]);
 
     useEffect(() => {
@@ -408,26 +408,29 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
                 <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                     <h2 className="text-lg font-bold text-slate-800">Sales Returns</h2>
                     <div className="flex items-center gap-3">
-                        <Input
-                            placeholder="Search returns..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            leftIcon={<Search size={18} />}
-                            className="w-64"
-                        />
-                        <Input
-                            type="date"
-                            value={fromDate}
-                            onChange={(e) => setFromDate(e.target.value)}
-                            className="w-40"
-                        />
-                        <Input
-                            type="date"
-                            value={toDate}
-                            onChange={(e) => setToDate(e.target.value)}
-                            className="w-40"
-                        />
-                        <Button onClick={openCreateModal} leftIcon={<Plus size={18} />}>
+                        <div className="w-64">
+                            <Input
+                                placeholder="Search returns..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                leftIcon={<Search size={18} />}
+                            />
+                        </div>
+                        <div className="w-40">
+                            <Input
+                                type="date"
+                                value={fromDate}
+                                onChange={(e) => setFromDate(e.target.value)}
+                            />
+                        </div>
+                        <div className="w-40">
+                            <Input
+                                type="date"
+                                value={toDate}
+                                onChange={(e) => setToDate(e.target.value)}
+                            />
+                        </div>
+                        <Button onClick={openCreateModal} leftIcon={<Plus size={18} />} className="flex-shrink-0">
                             New Return
                         </Button>
                     </div>

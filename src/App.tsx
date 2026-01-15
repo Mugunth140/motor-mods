@@ -13,11 +13,9 @@ import { StockManagement } from "./components/StockManagement";
 import { ToastProvider } from "./components/ui";
 import { backupService } from "./db/backupService";
 import { useAuthSession } from "./hooks";
-import { ReportIntent } from "./types/notifications";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [reportIntent, setReportIntent] = useState<ReportIntent | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const { session, login, logout } = useAuthSession();
 
@@ -48,7 +46,7 @@ function AppContent() {
       case "invoices":
         return <Invoices />;
       case "reports":
-        return <Reports intent={reportIntent} />;
+        return <Reports />;
       case "backups":
         return <BackupRestore />;
       case "settings":
@@ -79,14 +77,9 @@ function AppContent() {
       activeTab={activeTab}
       setActiveTab={(tab) => {
         setActiveTab(tab);
-        if (tab !== "reports") setReportIntent(null);
       }}
       session={session}
       onLogout={logout}
-      onReportIntent={(intent) => {
-        setReportIntent(intent);
-        setActiveTab("reports");
-      }}
     >
       {renderContent()}
     </Layout>

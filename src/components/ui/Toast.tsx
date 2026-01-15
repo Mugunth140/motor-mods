@@ -121,9 +121,9 @@ const ToastContainer: React.FC<{ toasts: Toast[]; removeToast: (id: string) => v
             </div>
             <button
               onClick={() => removeToast(toast.id)}
-              className="shrink-0 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 transition-colors -mr-1"
             >
-              <X size={14} />
+              <X size={18} />
             </button>
           </div>
         </div>

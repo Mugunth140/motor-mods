@@ -292,9 +292,11 @@ export const Settings: React.FC = () => {
                             <h3 className="text-lg font-bold text-slate-800 mb-4">General Settings</h3>
                             <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
                                 <div className="flex items-center gap-5">
-                                    <div className="w-20 h-20 bg-linear-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-lg shadow-indigo-200">
-                                        M
-                                    </div>
+                                    <img
+                                        src="/logo.png"
+                                        alt="MotorMods Logo"
+                                        className="w-20 h-20 rounded-2xl object-contain bg-white p-2 border border-slate-100 shadow-sm"
+                                    />
                                     <div>
                                         <h4 className="text-xl font-bold text-slate-800">MotorMods</h4>
                                         <p className="text-slate-500 font-medium">Billing & Inventory System</p>

@@ -430,7 +430,7 @@ export const Reports: React.FC<{ intent?: ReportIntent | null }> = ({ intent }) 
               </div>
             )}
 
-            <div className="md:col-span-1 flex gap-2">
+            <div className="md:col-span-1 flex items-end gap-2">
               <div className="flex-1">
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Sort</label>
                 <select
