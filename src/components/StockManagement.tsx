@@ -1,14 +1,19 @@
 import {
-    AlertTriangle,
-    BarChart3,
-    Edit2,
-    Package,
-    Plus,
-    Save,
-    Search,
-    Trash2,
-    TrendingUp,
-    X
+  AlertTriangle,
+  BarChart3,
+  Edit2,
+  Package,
+  Plus,
+  Save,
+  Search,
+  Trash2,
+  TrendingUp,
+  ChevronDown,
+  ChevronUp,
+  ArrowUpDown,
+  RotateCcw,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -54,8 +59,22 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
   // Category filter
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  // Pagination
-  const PAGE_SIZE = 25;
+  // Advanced Filters
+  const [filterState, setFilterState] = useState({
+    status: 'all' as 'all' | 'in_stock' | 'low_stock' | 'out_of_stock',
+    minPrice: '',
+    maxPrice: '',
+  });
+
+  const [sortState, setSortState] = useState<{ key: keyof Product | 'stock_value'; direction: 'asc' | 'desc' }>({
+    key: 'name',
+    direction: 'asc',
+  });
+
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Pagination - Optimize page size for larger datasets? 25 is fine.
+  const PAGE_SIZE = 20;
   const [page, setPage] = useState(1);
 
   const ensureCanEdit = () => {
@@ -79,23 +98,84 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = debouncedSearch.trim().toLowerCase();
-    return products.filter((p) => {
+
+    // First Filter
+    const filtered = products.filter((p) => {
+      // 1. Search
       const matchesSearch = !normalizedSearch
         ? true
         : p.name.toLowerCase().includes(normalizedSearch) ||
         (p.sku && p.sku.toLowerCase().includes(normalizedSearch));
+      if (!matchesSearch) return false;
 
+      // 2. Category
       const pCategory = (p.category || "Uncategorized").trim();
       const matchesCategory =
         categoryFilter === "all" ? true : pCategory === categoryFilter;
+      if (!matchesCategory) return false;
 
-      return matchesSearch && matchesCategory;
+      // 3. Status
+      if (filterState.status !== 'all') {
+        const qty = p.quantity;
+        if (filterState.status === 'out_of_stock' && qty > 0) return false;
+        if (filterState.status === 'in_stock' && qty <= 0) return false;
+        if (filterState.status === 'low_stock' && (qty <= 0 || qty > 5)) return false;
+      }
+
+      // 4. Price Range
+      const min = parseFloat(filterState.minPrice);
+      const max = parseFloat(filterState.maxPrice);
+      if (!isNaN(min) && p.price < min) return false;
+      if (!isNaN(max) && p.price > max) return false;
+
+      return true;
     });
-  }, [products, debouncedSearch, categoryFilter]);
+
+    // Then Sort
+    return filtered.sort((a, b) => {
+      const { key, direction } = sortState;
+      const mod = direction === 'asc' ? 1 : -1;
+
+      let valA: any = a[key as keyof Product];
+      let valB: any = b[key as keyof Product];
+
+      // Handle computed stock_value sort
+      if (key === 'stock_value') {
+        valA = a.price * a.quantity;
+        valB = b.price * b.quantity;
+      } else {
+        // Handle nulls/undefined for standard fields
+        if (valA === undefined || valA === null) valA = '';
+        if (valB === undefined || valB === null) valB = '';
+
+        // Case insensitive string sort
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+      }
+
+      if (valA < valB) return -1 * mod;
+      if (valA > valB) return 1 * mod;
+      return 0;
+    });
+
+  }, [products, debouncedSearch, categoryFilter, filterState, sortState]);
+
+  const handleSort = (key: keyof Product | 'stock_value') => {
+    setSortState(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const clearFilters = () => {
+    setCategoryFilter('all');
+    setFilterState({ status: 'all', minPrice: '', maxPrice: '' });
+    setSearchTerm('');
+  };
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, categoryFilter, products.length]);
+  }, [debouncedSearch, categoryFilter, filterState, products.length]);
 
   const totalPages = useMemo(() => {
     const pages = Math.ceil(filteredProducts.length / PAGE_SIZE);
@@ -375,6 +455,14 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
               ))}
             </select>
             <Button
+              variant="secondary"
+              onClick={() => setShowFilters(!showFilters)}
+              leftIcon={<SlidersHorizontal size={18} />}
+              className={showFilters ? "bg-slate-200 text-slate-800" : ""}
+            >
+              Filters
+            </Button>
+            <Button
               onClick={openAddModal}
               leftIcon={<Plus size={18} />}
               disabled={!canEdit}
@@ -385,6 +473,68 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
             </Button>
           </div>
         </div>
+
+        {/* Extended Filter Bar */}
+        {showFilters && (
+          <div className="p-4 bg-slate-50 border-b border-slate-100 grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top-2 duration-200">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Stock Status</label>
+              <select
+                value={filterState.status}
+                onChange={(e) => setFilterState({ ...filterState, status: e.target.value as any })}
+                className="w-full h-9 rounded-lg border-slate-200 text-sm focus:ring-indigo-500/20"
+              >
+                <option value="all">All Items</option>
+                <option value="in_stock">In Stock</option>
+                <option value="low_stock">Low Stock (≤ 5)</option>
+                <option value="out_of_stock">Out of Stock</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Category</label>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full h-9 rounded-lg border-slate-200 text-sm focus:ring-indigo-500/20"
+              >
+                <option value="all">All Categories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Price Range</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={filterState.minPrice}
+                  onChange={(e) => setFilterState({ ...filterState, minPrice: e.target.value })}
+                  className="w-full h-9 px-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={filterState.maxPrice}
+                  onChange={(e) => setFilterState({ ...filterState, maxPrice: e.target.value })}
+                  className="w-full h-9 px-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+            </div>
+            <div className="flex items-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFilters}
+                className="text-slate-500 hover:text-red-500 hover:bg-red-50 w-full justify-center"
+                leftIcon={<RotateCcw size={14} />}
+              >
+                Reset Filters
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-auto custom-scrollbar">
           {filteredProducts.length === 0 ? (
@@ -404,11 +554,52 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                 <tr>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Product</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Category</th>
+                  <th
+                    className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 select-none group"
+                    onClick={() => handleSort('name')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Product
+                      {sortState.key === 'name' && (
+                        sortState.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                      )}
+                      {sortState.key !== 'name' && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-30" />}
+                    </div>
+                  </th>
+                  <th
+                    className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 select-none group"
+                    onClick={() => handleSort('category')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Category
+                      {sortState.key === 'category' && (
+                        sortState.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                      )}
+                    </div>
+                  </th>
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Price</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Stock Status</th>
+                  <th
+                    className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 select-none group"
+                    onClick={() => handleSort('price')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Price
+                      {sortState.key === 'price' && (
+                        sortState.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 select-none group"
+                    onClick={() => handleSort('quantity')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Stock Status
+                      {sortState.key === 'quantity' && (
+                        sortState.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                      )}
+                    </div>
+                  </th>
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
