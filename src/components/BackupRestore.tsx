@@ -1,4 +1,3 @@
-import { relaunch } from "@tauri-apps/plugin-process";
 import {
     AlertTriangle,
     Archive,
@@ -111,30 +110,15 @@ export const BackupRestore: React.FC = () => {
         try {
             const result = await backupService.restoreFromBackup(restoreConfirm.backup.filename);
             toast.success("Restore Complete", result);
-
-            // Force restart to apply restored data - the SQLite connection needs to be closed
-            if (isTauriRuntime()) {
-                toast.info("Restarting App", "The application will close. Please reopen it to see restored data.");
-
-                setTimeout(async () => {
-                    try {
-                        // Use exit() - more reliable than relaunch() on Windows
-                        const { exit } = await import("@tauri-apps/plugin-process");
-                        await exit(0);
-                    } catch {
-                        // If exit fails, try relaunch
-                        try {
-                            await relaunch();
-                        } catch {
-                            toast.warning("Manual Restart Required", "Please close and reopen the application to see restored data.");
-                        }
-                    }
-                }, 2500);
-            }
+            
+            // Give user a moment to see success message, then reload to refresh all data
+            toast.info("Refreshing", "Reloading application to apply restored data...");
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
         } catch (error) {
             console.error(error);
             toast.error("Restore Failed", error instanceof Error ? error.message : "Could not restore backup");
-        } finally {
             setIsRestoring(false);
         }
     };
@@ -150,21 +134,15 @@ export const BackupRestore: React.FC = () => {
 
             const result = await backupService.importBackup(filePath);
             toast.success("Import Complete", result);
-
-            // Ask user to restart app
-            setTimeout(async () => {
-                if (isTauriRuntime()) {
-                    try {
-                        await relaunch();
-                    } catch {
-                        toast.info("Restart Required", "Please restart the application to apply the imported data.");
-                    }
-                }
-            }, 2000);
+            
+            // Give user a moment to see success message, then reload to refresh all data
+            toast.info("Refreshing", "Reloading application to apply imported data...");
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
         } catch (error) {
             console.error(error);
             toast.error("Import Failed", error instanceof Error ? error.message : "Could not import backup");
-        } finally {
             setIsImporting(false);
         }
     };

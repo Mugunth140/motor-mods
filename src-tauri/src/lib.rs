@@ -1,4 +1,5 @@
 use chrono::Local;
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -25,6 +26,27 @@ pub struct BackupFileInfo {
     pub modified_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RestoreResult {
+    pub success: bool,
+    pub message: String,
+    pub records_imported: usize,
+    pub safety_backup: String,
+}
+
+// Tables to restore in order (respecting foreign key dependencies)
+const DATA_TABLES: &[&str] = &[
+    "products",
+    "invoices", 
+    "invoice_items",
+    "settings",
+    "stock_adjustments",
+    "sales_returns",
+    "return_items",
+    "backup_log",
+    "users",
+];
+
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -46,6 +68,95 @@ fn get_backups_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(backups_dir)
 }
 
+/// Copy all data from one table to another using rusqlite
+/// This handles arbitrary column structures dynamically
+fn copy_table_data(
+    backup_conn: &Connection,
+    main_conn: &Connection,
+    table_name: &str,
+) -> Result<usize, String> {
+    // Check if table exists in backup
+    let table_exists: bool = backup_conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
+            params![table_name],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Failed to check table existence: {}", e))?;
+
+    if !table_exists {
+        return Ok(0);
+    }
+
+    // Get column names from backup table
+    let mut stmt = backup_conn
+        .prepare(&format!("PRAGMA table_info({})", table_name))
+        .map_err(|e| format!("Failed to get table info: {}", e))?;
+    
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("Failed to query columns: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if columns.is_empty() {
+        return Ok(0);
+    }
+
+    let columns_str = columns.join(", ");
+    let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("?{}", i)).collect();
+    let placeholders_str = placeholders.join(", ");
+
+    // Read all rows from backup
+    let select_sql = format!("SELECT {} FROM {}", columns_str, table_name);
+    let mut select_stmt = backup_conn
+        .prepare(&select_sql)
+        .map_err(|e| format!("Failed to prepare select: {}", e))?;
+
+    let column_count = columns.len();
+    let mut rows_data: Vec<Vec<rusqlite::types::Value>> = Vec::new();
+
+    let rows = select_stmt
+        .query_map([], |row| {
+            let mut values: Vec<rusqlite::types::Value> = Vec::new();
+            for i in 0..column_count {
+                let value: rusqlite::types::Value = row.get(i)?;
+                values.push(value);
+            }
+            Ok(values)
+        })
+        .map_err(|e| format!("Failed to query rows: {}", e))?;
+
+    for row in rows {
+        if let Ok(values) = row {
+            rows_data.push(values);
+        }
+    }
+
+    // Insert into main database
+    let insert_sql = format!(
+        "INSERT OR REPLACE INTO {} ({}) VALUES ({})",
+        table_name, columns_str, placeholders_str
+    );
+
+    let mut count = 0;
+    for values in rows_data {
+        let params: Vec<&dyn rusqlite::ToSql> = values
+            .iter()
+            .map(|v| v as &dyn rusqlite::ToSql)
+            .collect();
+
+        match main_conn.execute(&insert_sql, params.as_slice()) {
+            Ok(_) => count += 1,
+            Err(e) => {
+                eprintln!("Warning: Failed to insert row into {}: {}", table_name, e);
+            }
+        }
+    }
+
+    Ok(count)
+}
+
 // ============================================
 // TAURI COMMANDS
 // ============================================
@@ -56,6 +167,7 @@ fn greet(name: &str) -> String {
 }
 
 /// Creates a backup of the database and returns detailed information
+/// Uses SQLite's backup API to ensure a consistent backup even with WAL mode
 #[tauri::command]
 fn backup_database(app: AppHandle) -> Result<BackupResult, String> {
     let db_path = get_db_path(&app)?;
@@ -71,8 +183,21 @@ fn backup_database(app: AppHandle) -> Result<BackupResult, String> {
     let backup_filename = format!("motormods_backup_{}.db", timestamp);
     let backup_path = backups_dir.join(&backup_filename);
 
-    // Perform the copy
-    fs::copy(&db_path, &backup_path).map_err(|e| format!("Failed to backup database: {}", e))?;
+    // Use SQLite's backup API for a proper backup that handles WAL mode
+    // This ensures all data (including WAL) is included in the backup
+    let source_conn = Connection::open(&db_path)
+        .map_err(|e| format!("Failed to open source database: {}", e))?;
+    
+    let mut backup_conn = Connection::open(&backup_path)
+        .map_err(|e| format!("Failed to create backup database: {}", e))?;
+
+    // Use SQLite's backup API
+    let backup = rusqlite::backup::Backup::new(&source_conn, &mut backup_conn)
+        .map_err(|e| format!("Failed to initialize backup: {}", e))?;
+    
+    // Run the backup (copy all pages, -1 means copy all at once)
+    backup.run_to_completion(100, std::time::Duration::from_millis(10), None)
+        .map_err(|e| format!("Failed to complete backup: {}", e))?;
 
     // Get file size
     let metadata =
@@ -243,6 +368,135 @@ fn get_backups_path(app: AppHandle) -> Result<String, String> {
     Ok(backups_dir.to_string_lossy().to_string())
 }
 
+/// Gets the full path to a specific backup file
+#[tauri::command]
+fn get_backup_file_path(app: AppHandle, backup_filename: String) -> Result<String, String> {
+    let backups_dir = get_backups_dir(&app)?;
+    let backup_path = backups_dir.join(&backup_filename);
+
+    if !backup_path.exists() {
+        return Err(format!("Backup file not found: {}", backup_filename));
+    }
+
+    Ok(backup_path.to_string_lossy().to_string())
+}
+
+/// Creates a safety backup of the current database before import operations
+#[tauri::command]
+fn create_safety_backup(app: AppHandle) -> Result<String, String> {
+    let db_path = get_db_path(&app)?;
+    let backups_dir = get_backups_dir(&app)?;
+
+    if !db_path.exists() {
+        return Err("Database file not found".to_string());
+    }
+
+    let safety_filename = format!(
+        "pre_import_safety_{}.db",
+        Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+    let safety_path = backups_dir.join(&safety_filename);
+
+    fs::copy(&db_path, &safety_path)
+        .map_err(|e| format!("Failed to create safety backup: {}", e))?;
+
+    Ok(safety_filename)
+}
+
+/// Restores database by importing data from a backup file
+/// This uses rusqlite directly to handle the data import properly
+/// Much more robust than file replacement - works without app restart
+#[tauri::command]
+fn restore_data_from_backup(app: AppHandle, backup_path: String) -> Result<RestoreResult, String> {
+    let db_path = get_db_path(&app)?;
+    let backups_dir = get_backups_dir(&app)?;
+    let backup_file = PathBuf::from(&backup_path);
+
+    // Verify backup exists
+    if !backup_file.exists() {
+        return Err(format!("Backup file not found: {}", backup_path));
+    }
+
+    // Create a safety backup first
+    let safety_filename = format!(
+        "pre_restore_safety_{}.db",
+        Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+    let safety_path = backups_dir.join(&safety_filename);
+
+    if db_path.exists() {
+        fs::copy(&db_path, &safety_path)
+            .map_err(|e| format!("Failed to create safety backup: {}", e))?;
+    }
+
+    // Open both databases
+    let backup_conn = Connection::open(&backup_file)
+        .map_err(|e| format!("Failed to open backup database: {}", e))?;
+    
+    let main_conn = Connection::open(&db_path)
+        .map_err(|e| format!("Failed to open main database: {}", e))?;
+
+    // Disable foreign keys for the import
+    main_conn
+        .execute("PRAGMA foreign_keys = OFF", [])
+        .map_err(|e| format!("Failed to disable foreign keys: {}", e))?;
+
+    // Start a transaction
+    main_conn
+        .execute("BEGIN TRANSACTION", [])
+        .map_err(|e| format!("Failed to start transaction: {}", e))?;
+
+    let mut total_imported = 0;
+
+    // Clear and import each table
+    for table in DATA_TABLES.iter().rev() {
+        // Clear table first (reverse order for foreign keys)
+        if let Err(e) = main_conn.execute(&format!("DELETE FROM {}", table), []) {
+            eprintln!("Warning: Could not clear table {}: {}", table, e);
+        }
+    }
+
+    // Import data in forward order
+    for table in DATA_TABLES.iter() {
+        match copy_table_data(&backup_conn, &main_conn, table) {
+            Ok(count) => {
+                println!("[Restore] Imported {} rows into {}", count, table);
+                total_imported += count;
+            }
+            Err(e) => {
+                eprintln!("Warning: Error importing {}: {}", table, e);
+                // Continue with other tables
+            }
+        }
+    }
+
+    // Commit the transaction
+    if let Err(e) = main_conn.execute("COMMIT", []) {
+        // Try to rollback
+        let _ = main_conn.execute("ROLLBACK", []);
+        return Err(format!("Failed to commit transaction: {}", e));
+    }
+
+    // Re-enable foreign keys
+    let _ = main_conn.execute("PRAGMA foreign_keys = ON", []);
+
+    Ok(RestoreResult {
+        success: true,
+        message: format!("Successfully restored {} records from backup", total_imported),
+        records_imported: total_imported,
+        safety_backup: safety_filename,
+    })
+}
+
+/// Restores database by importing data from a backup file in the backups directory
+#[tauri::command]
+fn restore_data_from_backup_file(app: AppHandle, backup_filename: String) -> Result<RestoreResult, String> {
+    let backups_dir = get_backups_dir(&app)?;
+    let backup_path = backups_dir.join(&backup_filename);
+    
+    restore_data_from_backup(app, backup_path.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn print_receipt(text: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
@@ -411,6 +665,10 @@ pub fn run() {
             list_backups,
             delete_backup,
             get_backups_path,
+            get_backup_file_path,
+            create_safety_backup,
+            restore_data_from_backup,
+            restore_data_from_backup_file,
             print_receipt,
             print_pdf_silent
         ])

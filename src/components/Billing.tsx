@@ -207,43 +207,72 @@ export const Billing: React.FC = () => {
         invoiceItems
       );
 
-      // Attempt to auto-print PDF invoice silently
-      // If printing fails (e.g., printer not connected), show a toast warning but continue
-      try {
-        const { saveInvoicePdf } = await import("../utils/invoiceGenerator");
-        const { tryPrintPdfSilent } = await import("../utils/printService");
+      // Handle invoice PDF: Silent print on Windows, Save dialog on Linux
+      const invoiceData = {
+        invoice: {
+          id: invoiceId,
+          customer_name: customerName.trim() || "Walking Customer",
+          customer_phone: customerPhone.trim() || null,
+          discount_amount: discountAmount,
+          total_amount: totalAmount,
+          payment_mode: "cash" as const,
+          created_at: new Date().toISOString(),
+        },
+        items: cart.map((item) => ({
+          id: uuidv4(),
+          invoice_id: invoiceId,
+          product_id: item.id,
+          product_name: item.name,
+          quantity: item.cartQuantity,
+          price: item.price,
+          cost_price: item.purchase_price ?? 0,
+        })),
+      };
 
-        // Construct invoice data from cart (already in memory, no need to refetch)
-        const invoiceData = {
-          invoice: {
-            id: invoiceId,
-            customer_name: customerName.trim() || "Walking Customer",
-            customer_phone: customerPhone.trim() || null,
-            discount_amount: discountAmount,
-            total_amount: totalAmount,
-            payment_mode: "cash" as const,
-            created_at: new Date().toISOString(),
-          },
-          items: cart.map((item) => ({
-            id: uuidv4(),
-            invoice_id: invoiceId,
-            product_id: item.id,
-            product_name: item.name,
-            quantity: item.cartQuantity,
-            price: item.price,
-            cost_price: item.purchase_price ?? 0,
-          })),
+      const isWindows = navigator.platform.toLowerCase().includes('win');
+      
+      if (isWindows) {
+        // Windows: Silent print with timeout protection
+        const printWithTimeout = async () => {
+          const timeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Print operation timed out')), 10000)
+          );
+
+          const printOperation = async () => {
+            const { saveInvoicePdf } = await import("../utils/invoiceGenerator");
+            const { tryPrintPdfSilent } = await import("../utils/printService");
+            const pdfPath = await saveInvoicePdf(invoiceData);
+            return tryPrintPdfSilent(pdfPath);
+          };
+
+          return Promise.race([printOperation(), timeout]);
         };
 
-        const pdfPath = await saveInvoicePdf(invoiceData);
-        const printResult = await tryPrintPdfSilent(pdfPath);
-        if (!printResult.success) {
-          console.warn("Silent print failed:", printResult.error);
-          // Don't show error toast - invoice was still created successfully
+        try {
+          const printResult = await printWithTimeout();
+          if (!printResult.success) {
+            console.warn("Silent print failed:", printResult.error);
+          }
+        } catch (printErr) {
+          console.warn("Print error (non-blocking):", printErr);
         }
-      } catch (printErr) {
-        // Silent printing errors should not block checkout
-        console.warn("Print error (non-blocking):", printErr);
+      } else {
+        // Linux/macOS: Show save dialog
+        try {
+          const { generateInvoicePdfBytes } = await import("../utils/invoiceGenerator");
+          const { savePdfWithDialog } = await import("../utils/printService");
+          
+          const { bytes, filename } = await generateInvoicePdfBytes(invoiceData);
+          const saveResult = await savePdfWithDialog(bytes, filename);
+          
+          if (saveResult.success && saveResult.savedPath) {
+            toast.success("Invoice Saved", `Saved to ${saveResult.savedPath}`);
+          } else if (saveResult.error && saveResult.error !== "Save cancelled by user") {
+            console.warn("Save failed:", saveResult.error);
+          }
+        } catch (saveErr) {
+          console.warn("Save error (non-blocking):", saveErr);
+        }
       }
 
 

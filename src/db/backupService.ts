@@ -77,31 +77,56 @@ export const backupService = {
   },
 
   /**
-   * Restores the database from a backup in the backups directory
+   * Restores the database from a backup in the backups directory.
+   * Closes DB connection, replaces file, reopens connection.
    */
   async restoreFromBackup(backupFilename: string): Promise<string> {
     if (!isTauriRuntime()) {
       throw new Error("Restore is only available in the desktop application");
     }
 
-    const result = await invoke<string>("restore_database", {
-      backupFilename
-    });
+    // Import closeDatabase to close the connection before restore
+    const { closeDatabase } = await import("./index");
+    
+    // Step 1: Close the frontend database connection
+    await closeDatabase();
+    console.log("[Backup] Frontend DB connection closed");
+
+    // Step 2: Have Rust replace the database file
+    const result = await invoke<string>("restore_database", { backupFilename });
+    console.log("[Backup] File replacement result:", result);
+
+    // Step 3: Reopen the database connection by calling getDb
+    // This will create a fresh connection to the restored database
+    await getDb();
+    console.log("[Backup] Frontend DB connection reopened with restored data");
 
     return result;
   },
 
   /**
-   * Imports and restores from an external backup file
+   * Imports and restores from an external backup file path.
+   * Closes DB connection, replaces file, reopens connection.
    */
   async importBackup(sourcePath: string): Promise<string> {
     if (!isTauriRuntime()) {
       throw new Error("Import is only available in the desktop application");
     }
 
-    const result = await invoke<string>("import_backup", {
-      sourcePath
-    });
+    // Import closeDatabase to close the connection before import
+    const { closeDatabase } = await import("./index");
+    
+    // Step 1: Close the frontend database connection
+    await closeDatabase();
+    console.log("[Backup] Frontend DB connection closed");
+
+    // Step 2: Have Rust replace the database file with the external backup
+    const result = await invoke<string>("import_backup", { sourcePath });
+    console.log("[Backup] Import result:", result);
+
+    // Step 3: Reopen the database connection
+    await getDb();
+    console.log("[Backup] Frontend DB connection reopened with imported data");
 
     return result;
   },

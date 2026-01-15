@@ -7,6 +7,14 @@ import { isTauriRuntime } from "../db/runtime";
 export interface PrintResult {
     success: boolean;
     error?: string;
+    savedPath?: string;
+}
+
+/**
+ * Check if the current platform is Windows
+ */
+export function isWindowsPlatform(): boolean {
+    return navigator.platform.toLowerCase().includes('win');
 }
 
 /**
@@ -51,6 +59,39 @@ export async function tryPrintPdfSilent(pdfPath: string, printerName?: string): 
 }
 
 /**
+ * Save PDF using a file dialog (for non-Windows platforms)
+ * @param pdfData The PDF as Uint8Array
+ * @param defaultFilename Default filename suggestion
+ */
+export async function savePdfWithDialog(pdfData: Uint8Array, defaultFilename: string): Promise<PrintResult> {
+    if (!isTauriRuntime()) {
+        return { success: false, error: "Save dialog requires the desktop application." };
+    }
+
+    try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const { writeFile } = await import("@tauri-apps/plugin-fs");
+
+        const filePath = await save({
+            defaultPath: defaultFilename,
+            filters: [{ name: "PDF Files", extensions: ["pdf"] }],
+            title: "Save Invoice PDF"
+        });
+
+        if (filePath) {
+            await writeFile(filePath, pdfData);
+            return { success: true, savedPath: filePath };
+        } else {
+            return { success: false, error: "Save cancelled by user" };
+        }
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("Save PDF error:", errorMessage);
+        return { success: false, error: errorMessage };
+    }
+}
+
+/**
  * Check if printing is available (SumatraPDF is set up)
  */
 export async function isPrintingAvailable(): Promise<boolean> {
@@ -64,51 +105,4 @@ export async function isPrintingAvailable(): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-/**
- * Generate invoice PDF content and return as base64 for saving.
- * This can be used before calling printPdfSilent.
- */
-export function generateInvoicePdfContent(
-    invoiceData: {
-        invoiceNumber: string;
-        customerName: string;
-        customerPhone?: string;
-        items: Array<{ name: string; quantity: number; price: number; total: number }>;
-        subtotal: number;
-        tax: number;
-        total: number;
-        date: string;
-    }
-): string {
-    // This returns a simple text representation for now
-    // Can be enhanced with jsPDF for actual PDF generation
-    const lines = [
-        "================================",
-        "         MOTORMODS",
-        "      Performance Billing",
-        "================================",
-        "",
-        `Invoice: ${invoiceData.invoiceNumber}`,
-        `Date: ${invoiceData.date}`,
-        `Customer: ${invoiceData.customerName}`,
-        invoiceData.customerPhone ? `Phone: ${invoiceData.customerPhone}` : "",
-        "",
-        "--------------------------------",
-        "Items:",
-        "--------------------------------",
-        ...invoiceData.items.map(
-            (item) => `${item.name}\n  ${item.quantity} x ₹${item.price} = ₹${item.total}`
-        ),
-        "--------------------------------",
-        `Subtotal: ₹${invoiceData.subtotal}`,
-        invoiceData.tax > 0 ? `Tax: ₹${invoiceData.tax}` : "",
-        `TOTAL: ₹${invoiceData.total}`,
-        "================================",
-        "Thank you for your business!",
-        "================================",
-    ].filter(Boolean);
-
-    return lines.join("\n");
 }

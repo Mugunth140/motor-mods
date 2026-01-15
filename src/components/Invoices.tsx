@@ -1,18 +1,18 @@
 import {
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  DollarSign,
-  Eye,
-  FileText,
-  Package,
-  Printer,
-  Receipt,
-  RotateCcw,
-  Search,
-  TrendingUp,
-  User
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
+    Clock,
+    DollarSign,
+    Eye,
+    FileText,
+    Package,
+    Printer,
+    Receipt,
+    RotateCcw,
+    Search,
+    TrendingUp,
+    User
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoiceService } from "../db/invoiceService";
@@ -41,160 +41,92 @@ const InvoiceDetailModal: React.FC<{
   const handlePrint = async () => {
     if (!invoice) return;
 
-    toast.info("Generating PDF", "Creating invoice document...");
+    const isWindows = navigator.platform.toLowerCase().includes('win');
+    
+    if (isWindows) {
+      // Windows: Silent print
+      toast.info("Printing", "Sending invoice to printer...");
+      
+      try {
+        const { saveInvoicePdf } = await import("../utils/invoiceGenerator");
+        const { tryPrintPdfSilent } = await import("../utils/printService");
+        
+        const invoiceData = {
+          invoice: {
+            id: invoice.id,
+            customer_name: invoice.customer_name || "Walking Customer",
+            customer_phone: invoice.customer_phone || null,
+            discount_amount: invoice.discount_amount || 0,
+            total_amount: invoice.total_amount,
+            payment_mode: (invoice.payment_mode || "cash") as "cash" | "card" | "upi" | "cheque" | "credit",
+            created_at: invoice.created_at,
+          },
+          items: items.map((item) => ({
+            id: item.id,
+            invoice_id: item.invoice_id,
+            product_id: item.product_id,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            price: item.price,
+            cost_price: item.cost_price,
+          })),
+        };
 
-    try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeFile } = await import("@tauri-apps/plugin-fs");
-      const jsPDF = (await import("jspdf")).default;
-
-      // Generate PDF content using jsPDF
-      const { settingsService } = await import("../db/settingsService");
-      const settings = await settingsService.getAll();
-
-      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 15;
-      let yPos = margin;
-
-      // HEADER: Invoice title and store name
-      doc.setFontSize(28);
-      doc.setFont("helvetica", "bold");
-      doc.text("Invoice", margin, yPos + 10);
-      doc.setFontSize(16);
-      doc.text(settings.store_name || "MotorMods", pageWidth - margin, yPos + 10, { align: "right" });
-      yPos += 20;
-
-      // Store address line
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(80, 80, 80);
-      const addressParts: string[] = [];
-      if (settings.store_address) addressParts.push(settings.store_address);
-      if (settings.store_phone) addressParts.push(settings.store_phone);
-      if (settings.store_email) addressParts.push(settings.store_email);
-      if (addressParts.length > 0) {
-        doc.text(addressParts.join("  |  "), margin, yPos);
-        yPos += 6;
+        const pdfPath = await saveInvoicePdf(invoiceData);
+        const printResult = await tryPrintPdfSilent(pdfPath);
+        
+        if (printResult.success) {
+          toast.success("Print Sent", "Invoice sent to printer");
+        } else {
+          toast.warning("Print Failed", printResult.error || "Could not print invoice");
+        }
+      } catch (error) {
+        console.error("Print error:", error);
+        toast.error("Error", "Failed to print invoice");
       }
-      yPos += 8;
+    } else {
+      // Linux/macOS: Save dialog
+      toast.info("Generating PDF", "Creating invoice document...");
 
-      // Bill To + Invoice Info
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(100, 100, 100);
-      doc.text("BILL TO", margin, yPos);
-      yPos += 5;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(0, 0, 0);
-      doc.text(invoice.customer_name || "Walking Customer", margin, yPos);
-      if (invoice.customer_phone) {
-        yPos += 4;
-        doc.text(invoice.customer_phone, margin, yPos);
+      try {
+        const { generateInvoicePdfBytes } = await import("../utils/invoiceGenerator");
+        const { savePdfWithDialog } = await import("../utils/printService");
+        
+        const invoiceData = {
+          invoice: {
+            id: invoice.id,
+            customer_name: invoice.customer_name || "Walking Customer",
+            customer_phone: invoice.customer_phone || null,
+            discount_amount: invoice.discount_amount || 0,
+            total_amount: invoice.total_amount,
+            payment_mode: (invoice.payment_mode || "cash") as "cash" | "card" | "upi" | "cheque" | "credit",
+            created_at: invoice.created_at,
+          },
+          items: items.map((item) => ({
+            id: item.id,
+            invoice_id: item.invoice_id,
+            product_id: item.product_id,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            price: item.price,
+            cost_price: item.cost_price,
+          })),
+        };
+
+        const { bytes, filename } = await generateInvoicePdfBytes(invoiceData);
+        const saveResult = await savePdfWithDialog(bytes, filename);
+        
+        if (saveResult.success && saveResult.savedPath) {
+          toast.success("Invoice Saved", `Saved to ${saveResult.savedPath}`);
+        } else if (saveResult.error && saveResult.error !== "Save cancelled by user") {
+          toast.warning("Save Failed", saveResult.error || "Could not save invoice");
+        } else {
+          toast.info("Cancelled", "Save was cancelled");
+        }
+      } catch (error) {
+        console.error("PDF generation error:", error);
+        toast.error("Error", "Failed to generate invoice PDF");
       }
-
-      // Invoice info on right
-      const invoiceDate = new Date(invoice.created_at).toLocaleDateString("en-IN");
-      const rightColX = pageWidth - margin - 40;
-      const rightValX = pageWidth - margin;
-      let infoY = yPos - 9;
-      doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
-      doc.text("Invoice No.:", rightColX, infoY, { align: "right" });
-      doc.setTextColor(0, 0, 0);
-      doc.text(invoice.id.slice(-8).toUpperCase(), rightValX, infoY, { align: "right" });
-      infoY += 5;
-      doc.setTextColor(100, 100, 100);
-      doc.text("Date:", rightColX, infoY, { align: "right" });
-      doc.setTextColor(0, 0, 0);
-      doc.text(invoiceDate, rightValX, infoY, { align: "right" });
-      yPos += 15;
-
-      // Dark info bar
-      doc.setFillColor(50, 50, 50);
-      doc.rect(margin, yPos, pageWidth - 2 * margin, 12, "F");
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(255, 255, 255);
-      doc.text("Invoice No.", margin + 5, yPos + 8);
-      doc.text("Issue date", margin + 50, yPos + 8);
-      doc.text("Total due (₹)", pageWidth - margin - 35, yPos + 8);
-      yPos += 14;
-
-      doc.setFillColor(240, 240, 240);
-      doc.rect(margin, yPos, pageWidth - 2 * margin, 12, "F");
-      doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "normal");
-      doc.text(invoice.id.slice(-8).toUpperCase(), margin + 5, yPos + 8);
-      doc.text(invoiceDate, margin + 50, yPos + 8);
-      doc.setFont("helvetica", "bold");
-      doc.text(`₹ ${invoice.total_amount.toLocaleString("en-IN")}`, pageWidth - margin - 35, yPos + 8);
-      yPos += 22;
-
-      // Items table header
-      doc.setFillColor(255, 255, 255);
-      doc.setTextColor(100, 100, 100);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text("Description", margin, yPos);
-      doc.text("Qty", margin + 100, yPos);
-      doc.text("Unit Price (₹)", margin + 120, yPos);
-      doc.text("Amount (₹)", pageWidth - margin, yPos, { align: "right" });
-      yPos += 3;
-      doc.setDrawColor(220, 220, 220);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-      yPos += 6;
-
-      // Items
-      doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      for (const item of items) {
-        const amount = item.quantity * item.price;
-        doc.text(item.product_name || `Product #${item.product_id.slice(-6)}`, margin, yPos);
-        doc.text(item.quantity.toString(), margin + 100, yPos);
-        doc.text(`₹ ${item.price.toLocaleString("en-IN")}`, margin + 120, yPos);
-        doc.text(`₹ ${amount.toLocaleString("en-IN")}`, pageWidth - margin, yPos, { align: "right" });
-        yPos += 6;
-      }
-      yPos += 5;
-
-      // Total line
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.5);
-      doc.line(pageWidth - margin - 60, yPos, pageWidth - margin, yPos);
-      yPos += 8;
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Total (₹)", pageWidth - margin - 60, yPos);
-      doc.text(`₹ ${invoice.total_amount.toLocaleString("en-IN")}`, pageWidth - margin, yPos, { align: "right" });
-
-      // Footer
-      const footerY = doc.internal.pageSize.getHeight() - 15;
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(150, 150, 150);
-      doc.text("Thank you for your business!", pageWidth / 2, footerY, { align: "center" });
-
-      // Show Save As dialog
-      const filename = `Invoice_${invoice.id.slice(-8).toUpperCase()}_${new Date().toISOString().slice(0, 10)}.pdf`;
-      const filePath = await save({
-        defaultPath: filename,
-        filters: [{ name: "PDF Files", extensions: ["pdf"] }],
-        title: "Save Invoice PDF"
-      });
-
-      if (filePath) {
-        const pdfArrayBuffer = doc.output("arraybuffer");
-        await writeFile(filePath, new Uint8Array(pdfArrayBuffer));
-        toast.success("Invoice Saved", `Saved to ${filePath}`);
-      } else {
-        toast.info("Cancelled", "Save was cancelled");
-      }
-    } catch (error) {
-      console.error("PDF generation error:", error);
-      toast.error("Error", "Failed to generate invoice PDF");
     }
   };
 

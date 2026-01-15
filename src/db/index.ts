@@ -2,6 +2,29 @@ import Database from "@tauri-apps/plugin-sql";
 
 let db: Database | null = null;
 
+/**
+ * Closes the current database connection and clears the cached instance.
+ * Call this before restore operations to ensure the new database file is used.
+ */
+export const closeDatabase = async (): Promise<void> => {
+  if (db) {
+    try {
+      await db.close();
+      console.log("[DB] Database connection closed");
+    } catch (error) {
+      console.error("[DB] Error closing database:", error);
+    }
+    db = null;
+  }
+};
+
+/**
+ * Checks if there's an active database connection
+ */
+export const isDatabaseConnected = (): boolean => {
+  return db !== null;
+};
+
 const ensureSchema = async (database: Database) => {
   // ============================================
   // CORE TABLES
