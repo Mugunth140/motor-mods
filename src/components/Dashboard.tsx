@@ -43,25 +43,37 @@ const AnimatedCounter: React.FC<{ value: number; prefix?: string; suffix?: strin
     value, prefix = "", suffix = "", decimals = 0
 }) => {
     const [displayValue, setDisplayValue] = useState(0);
+    const previousValueRef = React.useRef(0);
 
     useEffect(() => {
         const duration = 1000;
         const startTime = Date.now();
-        const startValue = displayValue;
+        const startValue = previousValueRef.current;
+        let animationId: number;
 
         const animate = () => {
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / duration, 1);
             // Easing function for smooth animation
             const easeOut = 1 - Math.pow(1 - progress, 3);
-            setDisplayValue(startValue + (value - startValue) * easeOut);
+            const newValue = startValue + (value - startValue) * easeOut;
+            setDisplayValue(newValue);
 
             if (progress < 1) {
-                requestAnimationFrame(animate);
+                animationId = requestAnimationFrame(animate);
+            } else {
+                previousValueRef.current = value;
             }
         };
 
-        requestAnimationFrame(animate);
+        animationId = requestAnimationFrame(animate);
+        
+        // Cleanup: cancel animation on unmount or value change
+        return () => {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+        };
     }, [value]);
 
     return (
@@ -757,7 +769,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                             style={{ animationDelay: `${index * 50}ms` }}
                                         >
                                             <div>
-                                                <p className="text-sm font-medium text-slate-800 truncate max-w-[180px]">{item.name}</p>
+                                                <p className="text-sm font-medium text-slate-800 truncate max-w-45">{item.name}</p>
                                                 <p className="text-xs text-slate-500">{item.category || "Uncategorized"}</p>
                                             </div>
                                             <span className={`text-sm font-bold ${item.quantity <= 2 ? 'text-red-600' : 'text-amber-600'}`}>

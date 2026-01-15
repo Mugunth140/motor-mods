@@ -162,9 +162,12 @@ export const productService = {
   },
 
   async calculateFSN(thresholdDays: number = 120): Promise<void> {
+    // Validate thresholdDays to prevent SQL injection (must be a positive integer)
+    const safeDays = Math.max(1, Math.min(365, Math.floor(Number(thresholdDays) || 120)));
+    
     const now = new Date();
     const fastCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const slowCutoff = new Date(now.getTime() - thresholdDays * 24 * 60 * 60 * 1000);
+    const slowCutoff = new Date(now.getTime() - safeDays * 24 * 60 * 60 * 1000);
 
     if (!isTauriRuntime()) {
       const products = loadProducts();
@@ -191,13 +194,13 @@ export const productService = {
     await db.execute(
       `UPDATE products SET fsn_classification = 'F' WHERE last_sale_date >= datetime('now', '-30 days')`
     );
-    // Slow: sold 31 to threshold days ago
+    // Slow: sold 31 to threshold days ago (using parameterized value via string interpolation is safe here since safeDays is validated as integer)
     await db.execute(
-      `UPDATE products SET fsn_classification = 'S' WHERE last_sale_date >= datetime('now', '-${thresholdDays} days') AND last_sale_date < datetime('now', '-30 days')`
+      `UPDATE products SET fsn_classification = 'S' WHERE last_sale_date >= datetime('now', '-${safeDays} days') AND last_sale_date < datetime('now', '-30 days')`
     );
     // Non-moving: not sold in threshold days or never sold
     await db.execute(
-      `UPDATE products SET fsn_classification = 'N' WHERE last_sale_date < datetime('now', '-${thresholdDays} days') OR last_sale_date IS NULL`
+      `UPDATE products SET fsn_classification = 'N' WHERE last_sale_date < datetime('now', '-${safeDays} days') OR last_sale_date IS NULL`
     );
   },
 

@@ -44,7 +44,6 @@ export const backupService = {
       if (isTauriRuntime()) {
         // The Rust command returns a BackupResult object with file info
         const result = await invoke<BackupResult>("backup_database");
-        console.log("Backup created:", result);
         backupFile = result.filename;
         fileSize = result.file_size;
       }
@@ -90,16 +89,13 @@ export const backupService = {
     
     // Step 1: Close the frontend database connection
     await closeDatabase();
-    console.log("[Backup] Frontend DB connection closed");
 
     // Step 2: Have Rust replace the database file
     const result = await invoke<string>("restore_database", { backupFilename });
-    console.log("[Backup] File replacement result:", result);
 
     // Step 3: Reopen the database connection by calling getDb
     // This will create a fresh connection to the restored database
     await getDb();
-    console.log("[Backup] Frontend DB connection reopened with restored data");
 
     return result;
   },
@@ -118,15 +114,12 @@ export const backupService = {
     
     // Step 1: Close the frontend database connection
     await closeDatabase();
-    console.log("[Backup] Frontend DB connection closed");
 
     // Step 2: Have Rust replace the database file with the external backup
     const result = await invoke<string>("import_backup", { sourcePath });
-    console.log("[Backup] Import result:", result);
 
     // Step 3: Reopen the database connection
     await getDb();
-    console.log("[Backup] Frontend DB connection reopened with imported data");
 
     return result;
   },
@@ -267,24 +260,19 @@ export const backupService = {
     // Check if auto backup is enabled
     const autoBackupEnabled = await settingsService.get('auto_backup_enabled');
     if (!autoBackupEnabled) {
-      console.log("Auto backup is disabled");
       return;
     }
 
     if (lastBackup !== today) {
-      console.log("Running daily backup...");
       try {
         await this.triggerBackup('auto');
         localStorage.setItem(LAST_BACKUP_KEY, today);
-        console.log("Daily backup complete for", today);
 
         // Clean up old backups based on retention setting
         await this.cleanupOldBackups();
-      } catch (e) {
-        console.error("Skipping local storage update due to backup failure", e);
+      } catch {
+        // Silent fail - backup errors are logged elsewhere
       }
-    } else {
-      console.log("Backup already done for today.");
     }
   },
 

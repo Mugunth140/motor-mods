@@ -10,7 +10,6 @@ export const closeDatabase = async (): Promise<void> => {
   if (db) {
     try {
       await db.close();
-      console.log("[DB] Database connection closed");
     } catch (error) {
       console.error("[DB] Error closing database:", error);
     }

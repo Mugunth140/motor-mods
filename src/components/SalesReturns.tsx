@@ -430,7 +430,7 @@ export const SalesReturns: React.FC<SalesReturnsProps> = ({ userRole = "staff", 
                                 onChange={(e) => setToDate(e.target.value)}
                             />
                         </div>
-                        <Button onClick={openCreateModal} leftIcon={<Plus size={18} />} className="flex-shrink-0">
+                        <Button onClick={openCreateModal} leftIcon={<Plus size={18} />} className="shrink-0">
                             New Return
                         </Button>
                     </div>
