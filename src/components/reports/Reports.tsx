@@ -349,7 +349,7 @@ export const Reports: React.FC<{ intent?: ReportIntent | null }> = ({ intent }) 
   }, [sortedRows]);
 
   return (
-    <div className="flex flex-col gap-6 h-full pb-8">
+    <div className="flex flex-col gap-6 pb-8">
       <Card className="p-0 overflow-hidden shadow-md">
         <div className="p-5 border-b border-slate-100 bg-white flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-2 flex-wrap">

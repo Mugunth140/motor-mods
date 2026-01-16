@@ -1,18 +1,18 @@
 import {
-    Calendar,
-    ChevronLeft,
-    ChevronRight,
-    Clock,
-    DollarSign,
-    Eye,
-    FileText,
-    Package,
-    Printer,
-    Receipt,
-    RotateCcw,
-    Search,
-    TrendingUp,
-    User
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  DollarSign,
+  Eye,
+  FileText,
+  Package,
+  Printer,
+  Receipt,
+  RotateCcw,
+  Search,
+  TrendingUp,
+  User
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoiceService } from "../db/invoiceService";
@@ -42,15 +42,15 @@ const InvoiceDetailModal: React.FC<{
     if (!invoice) return;
 
     const isWindows = navigator.platform.toLowerCase().includes('win');
-    
+
     if (isWindows) {
       // Windows: Silent print
       toast.info("Printing", "Sending invoice to printer...");
-      
+
       try {
         const { saveInvoicePdf } = await import("../utils/invoiceGenerator");
         const { tryPrintPdfSilent } = await import("../utils/printService");
-        
+
         const invoiceData = {
           invoice: {
             id: invoice.id,
@@ -74,7 +74,7 @@ const InvoiceDetailModal: React.FC<{
 
         const pdfPath = await saveInvoicePdf(invoiceData);
         const printResult = await tryPrintPdfSilent(pdfPath);
-        
+
         if (printResult.success) {
           toast.success("Print Sent", "Invoice sent to printer");
         } else {
@@ -91,7 +91,7 @@ const InvoiceDetailModal: React.FC<{
       try {
         const { generateInvoicePdfBytes } = await import("../utils/invoiceGenerator");
         const { savePdfWithDialog } = await import("../utils/printService");
-        
+
         const invoiceData = {
           invoice: {
             id: invoice.id,
@@ -115,7 +115,7 @@ const InvoiceDetailModal: React.FC<{
 
         const { bytes, filename } = await generateInvoicePdfBytes(invoiceData);
         const saveResult = await savePdfWithDialog(bytes, filename);
-        
+
         if (saveResult.success && saveResult.savedPath) {
           toast.success("Invoice Saved", `Saved to ${saveResult.savedPath}`);
         } else if (saveResult.error && saveResult.error !== "Save cancelled by user") {
@@ -346,7 +346,7 @@ export const Invoices: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col gap-6 h-[calc(100vh-8rem)] animate-in fade-in duration-500">
+    <div className="flex flex-col gap-6 animate-in fade-in duration-500 pb-8">
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="flex items-center gap-4 hover:shadow-md transition-shadow">

@@ -208,8 +208,10 @@ export const Billing: React.FC = () => {
         invoiceItems
       );
 
-      // Handle invoice PDF: Silent print on Windows, Save dialog on Linux
-      const invoiceData = {
+      // NOTE: invoiceDataForPdf is commented out because auto-print is disabled.
+      // Uncomment this and the setTimeout block below to re-enable auto-printing.
+      /*
+      const invoiceDataForPdf = {
         invoice: {
           id: invoiceId,
           customer_name: customerName.trim() || "Walking Customer",
@@ -229,70 +231,68 @@ export const Billing: React.FC = () => {
           cost_price: item.purchase_price ?? 0,
         })),
       };
+      */
 
-      const isWindows = navigator.platform.toLowerCase().includes('win');
-
-      if (isWindows) {
-        // Windows: Silent print with timeout protection
-        const printWithTimeout = async () => {
-          const timeout = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Print operation timed out')), 10000)
-          );
-
-          const printOperation = async () => {
-            const { saveInvoicePdf } = await import("../utils/invoiceGenerator");
-            const { tryPrintPdfSilent } = await import("../utils/printService");
-            const pdfPath = await saveInvoicePdf(invoiceData);
-            return tryPrintPdfSilent(pdfPath);
-          };
-
-          return Promise.race([printOperation(), timeout]);
-        };
-
-        try {
-          const printResult = await printWithTimeout();
-          if (!printResult.success) {
-            console.warn("Silent print failed:", printResult.error);
-          }
-        } catch (printErr) {
-          console.warn("Print error (non-blocking):", printErr);
-        }
-      } else {
-        // Linux/macOS: Show save dialog
-        try {
-          const { generateInvoicePdfBytes } = await import("../utils/invoiceGenerator");
-          const { savePdfWithDialog } = await import("../utils/printService");
-
-          const { bytes, filename } = await generateInvoicePdfBytes(invoiceData);
-          const saveResult = await savePdfWithDialog(bytes, filename);
-
-          if (saveResult.success && saveResult.savedPath) {
-            toast.success("Invoice Saved", `Saved to ${saveResult.savedPath}`);
-          } else if (saveResult.error && saveResult.error !== "Save cancelled by user") {
-            console.warn("Save failed:", saveResult.error);
-          }
-        } catch (saveErr) {
-          console.warn("Save error (non-blocking):", saveErr);
-        }
-      }
-
-
-
+      // Show success FIRST, before any print operations
       toast.success(
         "Invoice Created",
         `Invoice #${invoiceId.slice(0, 8).toUpperCase()} for ₹${totalAmount.toLocaleString()}`
       );
 
+      // Clear cart and UI immediately
       setCart([]);
       setCustomerName("");
       setCustomerPhone("");
       setDiscount("");
-      refetch(); // Refresh product quantities
+      setIsCheckingOut(false);
+
+      // Refresh product quantities
+      refetch();
+
+      // NOTE: Auto-printing disabled to prevent UI freeze.
+      // PDF generation (jsPDF) is CPU-intensive and blocks the main thread.
+      // Users can manually export/print invoices from the Sales/Returns page.
+      // 
+      // To re-enable auto-printing in the future, consider using a Web Worker
+      // for PDF generation, or implement a print queue that processes invoices
+      // in the background.
+
+      /* DISABLED: Auto-print feature
+      setTimeout(async () => {
+        const isWindows = navigator.platform.toLowerCase().includes('win');
+
+        try {
+          if (isWindows) {
+            const { saveInvoicePdf } = await import("../utils/invoiceGenerator");
+            const { tryPrintPdfSilent } = await import("../utils/printService");
+            const pdfPath = await saveInvoicePdf(invoiceDataForPdf);
+            const printResult = await tryPrintPdfSilent(pdfPath);
+            if (!printResult.success) {
+              console.warn("Silent print failed:", printResult.error);
+            }
+          } else {
+            const { generateInvoicePdfBytes } = await import("../utils/invoiceGenerator");
+            const { savePdfWithDialog } = await import("../utils/printService");
+
+            const { bytes, filename } = await generateInvoicePdfBytes(invoiceDataForPdf);
+            const saveResult = await savePdfWithDialog(bytes, filename);
+
+            if (saveResult.success && saveResult.savedPath) {
+              console.log("Invoice saved to:", saveResult.savedPath);
+            } else if (saveResult.error && saveResult.error !== "Save cancelled by user") {
+              console.warn("Save failed:", saveResult.error);
+            }
+          }
+        } catch (printErr) {
+          console.warn("Print/Save error (non-blocking):", printErr);
+        }
+      }, 100);
+      */
+
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : String(error);
       toast.error("Checkout Failed", message || "Could not create invoice. Please try again.");
-    } finally {
       setIsCheckingOut(false);
     }
   };
@@ -343,7 +343,7 @@ export const Billing: React.FC = () => {
 
         {/* Product Grid */}
         {/* Product Grid - Virtualized */}
-        <div className="flex-1 overflow-hidden p-2 bg-slate-50/30 rounded-3xl border border-slate-100/50 ml-1">
+        <div className="flex-1 overflow-visible p-1 bg-slate-50/30 rounded-3xl border border-slate-100/50 ml-1">
           {filteredProducts.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50">
               <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-4">
@@ -356,7 +356,7 @@ export const Billing: React.FC = () => {
             <VirtuosoGrid
               style={{ height: '100%', width: '100%' }}
               totalCount={filteredProducts.length}
-              listClassName="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-2 pb-20"
+              listClassName="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 p-4 pb-20"
               itemContent={(index: number) => {
                 const p = filteredProducts[index];
                 if (!p) return null;
@@ -374,59 +374,61 @@ export const Billing: React.FC = () => {
                 const isDisabled = p.quantity <= 0;
 
                 return (
-                  <button
-                    onClick={() => handleProductClick(p)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (!isDisabled) {
-                        setQuickAddProduct(p);
-                        setQuickAddQty("1");
-                      }
-                    }}
-                    disabled={isDisabled}
-                    className={`
-                      relative text-left p-4 rounded-2xl border transition-all duration-200 group flex flex-col h-full w-full shadow-sm
-                      ${isDisabled
-                        ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed'
-                        : 'bg-white border-slate-200 hover:border-indigo-400 hover:shadow-lg hover:-translate-y-1'
-                      }
-                      ${inCartItem ? 'ring-2 ring-indigo-500 ring-offset-2 border-indigo-200 bg-indigo-50/10' : ''}
-                    `}
-                  >
-                    {/* In Cart Indicator */}
-                    {inCartItem && (
-                      <div className="absolute -top-2 -right-2 w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-2 border-white z-10 animate-in zoom-in">
-                        {inCartItem.cartQuantity}
-                      </div>
-                    )}
+                  <div className="p-2 h-full">
+                    <button
+                      onClick={() => handleProductClick(p)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (!isDisabled) {
+                          setQuickAddProduct(p);
+                          setQuickAddQty("1");
+                        }
+                      }}
+                      disabled={isDisabled}
+                      className={`
+                        relative text-left p-4 rounded-2xl border transition-all duration-300 group flex flex-col h-full w-full shadow-sm
+                        ${isDisabled
+                          ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed'
+                          : 'bg-white border-slate-200 hover:border-indigo-400 hover:shadow-xl hover:-translate-y-1.5'
+                        }
+                        ${inCartItem ? 'ring-2 ring-indigo-500 ring-offset-2 border-indigo-200 bg-indigo-50/10' : ''}
+                      `}
+                    >
+                      {/* In Cart Indicator */}
+                      {inCartItem && (
+                        <div className="absolute -top-2 -right-2 w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-2 border-white z-10 animate-in zoom-in">
+                          {inCartItem.cartQuantity}
+                        </div>
+                      )}
 
-                    <div className="flex justify-between items-start mb-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${inCartItem ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500 group-hover:bg-indigo-50 group-hover:text-indigo-600'}`}>
-                        <Package size={20} />
+                      <div className="flex justify-between items-start mb-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${inCartItem ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500 group-hover:bg-indigo-50 group-hover:text-indigo-600'}`}>
+                          <Package size={20} />
+                        </div>
+                        <Badge variant={statusVariant} size="sm" className="shadow-sm text-[10px]">
+                          {statusText}
+                        </Badge>
                       </div>
-                      <Badge variant={statusVariant} size="sm" className="shadow-sm text-[10px]">
-                        {statusText}
-                      </Badge>
-                    </div>
 
-                    <div className="flex-1 min-h-[3rem]">
-                      <h3 className="font-bold text-slate-800 line-clamp-2 leading-snug mb-1 group-hover:text-indigo-700 transition-colors text-sm">{p.name}</h3>
-                      <p className="text-[10px] text-slate-400 font-mono tracking-wide">{p.sku || "NO SKU"}</p>
-                    </div>
-
-                    <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                      <span className="text-base font-bold text-slate-900">₹{p.price.toLocaleString()}</span>
-                      <div
-                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all
-                          ${isDisabled
-                            ? 'bg-slate-100 text-slate-300'
-                            : 'bg-slate-100 text-slate-600 group-hover:bg-indigo-600 group-hover:text-white shadow-sm'
-                          }`}
-                      >
-                        <Plus size={14} strokeWidth={2.5} />
+                      <div className="flex-1 min-h-[3rem]">
+                        <h3 className="font-bold text-slate-800 line-clamp-2 leading-snug mb-1 group-hover:text-indigo-700 transition-colors text-sm">{p.name}</h3>
+                        <p className="text-[10px] text-slate-400 font-mono tracking-wide">{p.sku || "NO SKU"}</p>
                       </div>
-                    </div>
-                  </button>
+
+                      <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
+                        <span className="text-base font-bold text-slate-900">₹{p.price.toLocaleString()}</span>
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all
+                            ${isDisabled
+                              ? 'bg-slate-100 text-slate-300'
+                              : 'bg-slate-100 text-slate-600 group-hover:bg-indigo-600 group-hover:text-white shadow-sm'
+                            }`}
+                        >
+                          <Plus size={14} strokeWidth={2.5} />
+                        </div>
+                      </div>
+                    </button>
+                  </div>
                 );
               }}
             />
