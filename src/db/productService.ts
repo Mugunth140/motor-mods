@@ -1,4 +1,9 @@
 import { Product } from "../types";
+import {
+  deleteProductFromFirestore,
+  syncProductToFirestore,
+  syncStockQuantityToFirestore,
+} from "./firestoreSync";
 import { getDb } from "./index";
 import { isTauriRuntime } from "./runtime";
 
@@ -95,6 +100,12 @@ export const productService = {
         fullProduct.purchase_price, fullProduct.reorder_level, fullProduct.max_stock
       ]
     );
+
+    // Sync to Firestore (fire and forget - don't block on cloud sync)
+    const productToSync = await this.getById(fullProduct.id);
+    if (productToSync) {
+      syncProductToFirestore(productToSync).catch(console.error);
+    }
   },
 
   async update(product: Product): Promise<void> {
@@ -115,6 +126,12 @@ export const productService = {
       "UPDATE products SET name = $1, sku = $2, category = $3, price = $4, quantity = $5, purchase_price = $6, reorder_level = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8",
       [product.name, product.sku, product.category, product.price, product.quantity, product.purchase_price ?? 0, product.reorder_level ?? 5, product.id]
     );
+
+    // Sync to Firestore (fire and forget)
+    const updatedProduct = await this.getById(product.id);
+    if (updatedProduct) {
+      syncProductToFirestore(updatedProduct).catch(console.error);
+    }
   },
 
   async delete(id: string): Promise<void> {
@@ -125,6 +142,9 @@ export const productService = {
     }
     const db = await getDb();
     await db.execute("DELETE FROM products WHERE id = $1", [id]);
+
+    // Delete from Firestore (fire and forget)
+    deleteProductFromFirestore(id).catch(console.error);
   },
 
   async updateQuantity(id: string, delta: number): Promise<void> {
@@ -142,6 +162,12 @@ export const productService = {
       "UPDATE products SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
       [delta, id]
     );
+
+    // Sync updated quantity to Firestore
+    const updatedProduct = await this.getById(id);
+    if (updatedProduct) {
+      syncStockQuantityToFirestore(id, updatedProduct.quantity).catch(console.error);
+    }
   },
 
   async updateLastSaleDate(id: string): Promise<void> {
@@ -164,7 +190,7 @@ export const productService = {
   async calculateFSN(thresholdDays: number = 120): Promise<void> {
     // Validate thresholdDays to prevent SQL injection (must be a positive integer)
     const safeDays = Math.max(1, Math.min(365, Math.floor(Number(thresholdDays) || 120)));
-    
+
     const now = new Date();
     const fastCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const slowCutoff = new Date(now.getTime() - safeDays * 24 * 60 * 60 * 1000);
