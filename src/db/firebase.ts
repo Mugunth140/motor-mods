@@ -62,16 +62,33 @@ export const initializeFirebase = (): boolean => {
  */
 export const getFirestoreDb = (): Firestore | null => {
   if (!db && isFirebaseConfigured()) {
-    initializeFirebase();
+    const initialized = initializeFirebase();
+    if (!initialized) {
+      console.error("Failed to initialize Firebase on demand");
+      return null;
+    }
   }
   return db;
 };
 
 /**
  * Check if Firestore sync is available
+ * This checks both configuration AND initialization
  */
 export const isFirestoreSyncEnabled = (): boolean => {
-  return isFirebaseConfigured() && db !== null;
+  if (!isFirebaseConfigured()) {
+    return false;
+  }
+  
+  // Ensure Firebase is initialized
+  if (!db) {
+    const initialized = initializeFirebase();
+    if (!initialized) {
+      return false;
+    }
+  }
+  
+  return db !== null;
 };
 
 export { isFirebaseConfigured };

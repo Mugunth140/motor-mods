@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { isFirestoreSyncEnabled } from "../db/firebase";
-import { syncAllProductsToFirestore } from "../db/firestoreSync";
+import { clearAllProductsFromFirestore, syncAllProductsToFirestore } from "../db/firestoreSync";
 import { getDb } from "../db/index";
 import { productService } from "../db/productService";
 import { isTauriRuntime } from "../db/runtime";
@@ -325,11 +325,16 @@ export const Settings: React.FC = () => {
             // Clear Firestore products to keep PWA in sync
             if (isFirestoreSyncEnabled()) {
                 try {
-                    await clearAllProductsFromFirestore();
-                    toast.success("Database & Cloud Cleared", "All products, invoices, returns, and stock adjustments have been deleted from local and cloud storage");
+                    const cleared = await clearAllProductsFromFirestore();
+                    if (cleared) {
+                        toast.success("Database & Cloud Cleared", "All products, invoices, returns, and stock adjustments have been deleted from local and cloud storage");
+                    } else {
+                        toast.success("Database Cleared", "Local data cleared. Cloud sync was skipped (not configured).");
+                    }
                 } catch (cloudError) {
                     console.error("Failed to clear cloud data:", cloudError);
-                    toast.warning("Partial Clear", "Local database cleared but cloud sync failed. PWA may show stale data until next sync.");
+                    const errorMsg = cloudError instanceof Error ? cloudError.message : "Unknown error";
+                    toast.warning("Partial Clear", `Local database cleared but cloud sync failed: ${errorMsg}`);
                 }
             } else {
                 toast.success("Database Cleared", "All products, invoices, returns, and stock adjustments have been deleted");

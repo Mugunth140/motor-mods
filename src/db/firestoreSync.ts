@@ -340,22 +340,66 @@ export const deleteProductFromFirestore = async (productId: string): Promise<boo
  * Clear all products from Firestore
  * Called when the local database is cleared
  * This is a critical operation that ensures PWA stays in sync
+ * @throws Error if clear operation fails
  */
 export const clearAllProductsFromFirestore = async (): Promise<boolean> => {
     if (!isFirestoreSyncEnabled()) {
         console.debug("Firestore sync disabled - skipping clear all");
-        return false;
+        // Return true since there's nothing to clear if sync is disabled
+        return true;
+    }
+
+    const db = getFirestoreDb();
+    if (!db) {
+        throw new Error("Firestore not initialized");
     }
 
     dispatchSyncStart();
+    console.log('[Firestore Clear] Starting clear operation...');
+    
     try {
-        await clearAllProductsFromFirestoreInternal();
-        console.log("All products cleared from Firestore successfully");
+        console.log('[Firestore Clear] Getting products collection reference...');
+        const productsRef = collection(db, PRODUCTS_COLLECTION);
+        
+        console.log('[Firestore Clear] Fetching existing documents...');
+        const snapshot = await getDocs(productsRef);
+        
+        if (snapshot.empty) {
+            console.log('[Firestore Clear] No products to clear from Firestore');
+            return true;
+        }
+        
+        console.log(`[Firestore Clear] Found ${snapshot.docs.length} documents to delete`);
+
+        // Delete in batches of 500 (Firestore limit)
+        const docs = snapshot.docs;
+        let deletedCount = 0;
+        
+        for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+            const batch = writeBatch(db);
+            const batchDocs = docs.slice(i, i + BATCH_SIZE);
+            
+            for (const docSnap of batchDocs) {
+                batch.delete(docSnap.ref);
+            }
+            
+            await batch.commit();
+            deletedCount += batchDocs.length;
+            console.log(`Deleted batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batchDocs.length} products (total: ${deletedCount}/${docs.length})`);
+        }
+        
+        console.log(`All ${deletedCount} products cleared from Firestore successfully`);
         return true;
     } catch (error) {
-        console.error("Failed to clear all products from Firestore:", error);
-        dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
-        return false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorCode = (error as { code?: string })?.code || 'unknown';
+        console.error("[Firestore Clear] Failed:", {
+            message: errorMessage,
+            code: errorCode,
+            error
+        });
+        dispatchSyncError(error instanceof Error ? error : new Error(errorMessage));
+        throw new Error(`Cloud sync failed (${errorCode}): ${errorMessage}`);
     } finally {
         dispatchSyncEnd();
     }
