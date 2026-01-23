@@ -322,7 +322,18 @@ export const Settings: React.FC = () => {
             await db.execute("DELETE FROM stock_adjustments");
             await db.execute("DELETE FROM products");
 
-            toast.success("Database Cleared", "All products, invoices, returns, and stock adjustments have been deleted");
+            // Clear Firestore products to keep PWA in sync
+            if (isFirestoreSyncEnabled()) {
+                try {
+                    await clearAllProductsFromFirestore();
+                    toast.success("Database & Cloud Cleared", "All products, invoices, returns, and stock adjustments have been deleted from local and cloud storage");
+                } catch (cloudError) {
+                    console.error("Failed to clear cloud data:", cloudError);
+                    toast.warning("Partial Clear", "Local database cleared but cloud sync failed. PWA may show stale data until next sync.");
+                }
+            } else {
+                toast.success("Database Cleared", "All products, invoices, returns, and stock adjustments have been deleted");
+            }
         } catch (error) {
             console.error(error);
             toast.error("Clear Failed", error instanceof Error ? error.message : "Could not clear database");

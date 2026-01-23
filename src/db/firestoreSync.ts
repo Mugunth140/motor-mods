@@ -3,11 +3,19 @@
  * 
  * This service handles synchronization of product/stock data
  * from the local SQLite database to Firestore for the PWA to consume.
+ * 
+ * Production-grade features:
+ * - Retry logic with exponential backoff
+ * - Offline queue for failed syncs
+ * - Batch operations for efficiency
+ * - Error tracking and recovery
  */
 
 import {
+    collection,
     deleteDoc,
     doc,
+    getDocs,
     serverTimestamp,
     setDoc,
     Timestamp,
@@ -17,8 +25,31 @@ import { Product } from "../types";
 import { getFirestoreDb, isFirestoreSyncEnabled } from "./firebase";
 
 const PRODUCTS_COLLECTION = "products";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+const BATCH_SIZE = 500; // Firestore batch limit
 
-// Sync event helpers for UI updates
+// ============================================
+// SYNC QUEUE FOR OFFLINE/FAILED OPERATIONS
+// ============================================
+
+interface SyncOperation {
+    id: string;
+    type: 'upsert' | 'delete' | 'clear';
+    data?: Product;
+    productId?: string;
+    retryCount: number;
+    createdAt: number;
+}
+
+// In-memory queue for pending sync operations
+const syncQueue: SyncOperation[] = [];
+let isProcessingQueue = false;
+
+// ============================================
+// EVENT DISPATCHERS FOR UI FEEDBACK
+// ============================================
+
 const dispatchSyncStart = () => {
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('firestore-sync-start'));
@@ -30,6 +61,49 @@ const dispatchSyncEnd = () => {
         window.dispatchEvent(new Event('firestore-sync-end'));
     }
 };
+
+const dispatchSyncError = (error: Error) => {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('firestore-sync-error', { detail: error }));
+    }
+};
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Sleep for a specified duration
+ */
+const sleep = (ms: number): Promise<void> => 
+    new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Retry a function with exponential backoff
+ */
+async function withRetry<T>(
+    fn: () => Promise<T>,
+    maxRetries: number = MAX_RETRIES,
+    delayMs: number = RETRY_DELAY_MS
+): Promise<T> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            
+            if (attempt < maxRetries) {
+                const backoffDelay = delayMs * Math.pow(2, attempt);
+                console.warn(`Sync attempt ${attempt + 1} failed, retrying in ${backoffDelay}ms...`, error);
+                await sleep(backoffDelay);
+            }
+        }
+    }
+    
+    throw lastError;
+}
 
 /**
  * Firestore product document structure
@@ -71,9 +145,157 @@ const toFirestoreProduct = (product: Product): Omit<FirestoreProduct, 'synced_at
     updated_at: product.updated_at ?? new Date().toISOString(),
 });
 
+// ============================================
+// SYNC QUEUE PROCESSOR
+// ============================================
+
+/**
+ * Add an operation to the sync queue
+ */
+const queueSyncOperation = (operation: Omit<SyncOperation, 'id' | 'retryCount' | 'createdAt'>) => {
+    const queueItem: SyncOperation = {
+        ...operation,
+        id: `${operation.type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        retryCount: 0,
+        createdAt: Date.now(),
+    };
+    syncQueue.push(queueItem);
+    processQueue();
+};
+
+/**
+ * Process the sync queue
+ */
+const processQueue = async () => {
+    if (isProcessingQueue || syncQueue.length === 0) return;
+    if (!isFirestoreSyncEnabled()) return;
+
+    isProcessingQueue = true;
+    dispatchSyncStart();
+
+    try {
+        while (syncQueue.length > 0) {
+            const operation = syncQueue[0];
+            
+            try {
+                switch (operation.type) {
+                    case 'upsert':
+                        if (operation.data) {
+                            await syncProductToFirestoreInternal(operation.data);
+                        }
+                        break;
+                    case 'delete':
+                        if (operation.productId) {
+                            await deleteProductFromFirestoreInternal(operation.productId);
+                        }
+                        break;
+                    case 'clear':
+                        await clearAllProductsFromFirestoreInternal();
+                        break;
+                }
+                
+                // Success - remove from queue
+                syncQueue.shift();
+            } catch (error) {
+                operation.retryCount++;
+                
+                if (operation.retryCount >= MAX_RETRIES) {
+                    console.error(`Sync operation failed after ${MAX_RETRIES} retries:`, operation, error);
+                    dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
+                    syncQueue.shift(); // Remove failed operation
+                } else {
+                    // Move to end of queue for retry
+                    syncQueue.shift();
+                    syncQueue.push(operation);
+                    await sleep(RETRY_DELAY_MS * Math.pow(2, operation.retryCount));
+                }
+            }
+        }
+    } finally {
+        isProcessingQueue = false;
+        dispatchSyncEnd();
+    }
+};
+
+// ============================================
+// INTERNAL SYNC FUNCTIONS (with retries)
+// ============================================
+
+/**
+ * Internal function to sync a product to Firestore
+ */
+const syncProductToFirestoreInternal = async (product: Product): Promise<void> => {
+    const db = getFirestoreDb();
+    if (!db) throw new Error('Firestore not initialized');
+
+    await withRetry(async () => {
+        const docRef = doc(db, PRODUCTS_COLLECTION, product.id);
+        await setDoc(docRef, {
+            ...toFirestoreProduct(product),
+            synced_at: serverTimestamp(),
+        });
+    });
+    
+    console.log(`Product synced to Firestore: ${product.name}`);
+};
+
+/**
+ * Internal function to delete a product from Firestore
+ */
+const deleteProductFromFirestoreInternal = async (productId: string): Promise<void> => {
+    const db = getFirestoreDb();
+    if (!db) throw new Error('Firestore not initialized');
+
+    await withRetry(async () => {
+        const docRef = doc(db, PRODUCTS_COLLECTION, productId);
+        await deleteDoc(docRef);
+    });
+    
+    console.log(`Product deleted from Firestore: ${productId}`);
+};
+
+/**
+ * Internal function to clear all products from Firestore
+ */
+const clearAllProductsFromFirestoreInternal = async (): Promise<void> => {
+    const db = getFirestoreDb();
+    if (!db) throw new Error('Firestore not initialized');
+
+    await withRetry(async () => {
+        const productsRef = collection(db, PRODUCTS_COLLECTION);
+        const snapshot = await getDocs(productsRef);
+        
+        if (snapshot.empty) {
+            console.log('No products to clear from Firestore');
+            return;
+        }
+
+        // Delete in batches of 500 (Firestore limit)
+        const docs = snapshot.docs;
+        for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+            const batch = writeBatch(db);
+            const batchDocs = docs.slice(i, i + BATCH_SIZE);
+            
+            for (const docSnap of batchDocs) {
+                batch.delete(docSnap.ref);
+            }
+            
+            await batch.commit();
+            console.log(`Deleted batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batchDocs.length} products`);
+        }
+    });
+    
+    console.log('All products cleared from Firestore');
+};
+
+// ============================================
+// PUBLIC API
+// ============================================
+
 /**
  * Sync a single product to Firestore
  * Called after product create/update operations
+ * Uses queue for reliability
  */
 export const syncProductToFirestore = async (product: Product): Promise<boolean> => {
     if (!isFirestoreSyncEnabled()) {
@@ -81,29 +303,21 @@ export const syncProductToFirestore = async (product: Product): Promise<boolean>
         return false;
     }
 
-    const db = getFirestoreDb();
-    if (!db) return false;
-
-    dispatchSyncStart();
     try {
-        const docRef = doc(db, PRODUCTS_COLLECTION, product.id);
-        await setDoc(docRef, {
-            ...toFirestoreProduct(product),
-            synced_at: serverTimestamp(),
-        });
-        console.log(`Product synced to Firestore: ${product.name}`);
+        // Queue the operation for reliable sync
+        queueSyncOperation({ type: 'upsert', data: product });
         return true;
     } catch (error) {
-        console.error(`Failed to sync product ${product.id}:`, error);
+        console.error(`Failed to queue product sync ${product.id}:`, error);
+        dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
         return false;
-    } finally {
-        dispatchSyncEnd();
     }
 };
 
 /**
  * Delete a product from Firestore
  * Called after local product deletion
+ * Uses queue for reliability
  */
 export const deleteProductFromFirestore = async (productId: string): Promise<boolean> => {
     if (!isFirestoreSyncEnabled()) {
@@ -111,17 +325,39 @@ export const deleteProductFromFirestore = async (productId: string): Promise<boo
         return false;
     }
 
-    const db = getFirestoreDb();
-    if (!db) return false;
-
     try {
-        const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-        await deleteDoc(docRef);
-        console.log(`Product deleted from Firestore: ${productId}`);
+        // Queue the operation for reliable sync
+        queueSyncOperation({ type: 'delete', productId });
         return true;
     } catch (error) {
-        console.error(`Failed to delete product ${productId} from Firestore:`, error);
+        console.error(`Failed to queue product delete ${productId}:`, error);
+        dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
         return false;
+    }
+};
+
+/**
+ * Clear all products from Firestore
+ * Called when the local database is cleared
+ * This is a critical operation that ensures PWA stays in sync
+ */
+export const clearAllProductsFromFirestore = async (): Promise<boolean> => {
+    if (!isFirestoreSyncEnabled()) {
+        console.debug("Firestore sync disabled - skipping clear all");
+        return false;
+    }
+
+    dispatchSyncStart();
+    try {
+        await clearAllProductsFromFirestoreInternal();
+        console.log("All products cleared from Firestore successfully");
+        return true;
+    } catch (error) {
+        console.error("Failed to clear all products from Firestore:", error);
+        dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
+        return false;
+    } finally {
+        dispatchSyncEnd();
     }
 };
 
@@ -129,6 +365,7 @@ export const deleteProductFromFirestore = async (productId: string): Promise<boo
  * Bulk sync all products to Firestore
  * Useful for initial sync or manual full sync
  * Uses batched writes for efficiency (max 500 per batch)
+ * Includes retry logic for reliability
  */
 export const syncAllProductsToFirestore = async (products: Product[]): Promise<{
     success: boolean;
@@ -143,25 +380,29 @@ export const syncAllProductsToFirestore = async (products: Product[]): Promise<{
     const db = getFirestoreDb();
     if (!db) return { success: false, synced: 0, failed: products.length };
 
-    const BATCH_SIZE = 500;
     let synced = 0;
     let failed = 0;
 
+    dispatchSyncStart();
     try {
         // Process in batches of 500 (Firestore limit)
         for (let i = 0; i < products.length; i += BATCH_SIZE) {
-            const batch = writeBatch(db);
             const batchProducts = products.slice(i, i + BATCH_SIZE);
 
-            for (const product of batchProducts) {
-                const docRef = doc(db, PRODUCTS_COLLECTION, product.id);
-                batch.set(docRef, {
-                    ...toFirestoreProduct(product),
-                    synced_at: serverTimestamp(),
-                });
-            }
+            await withRetry(async () => {
+                const batch = writeBatch(db);
 
-            await batch.commit();
+                for (const product of batchProducts) {
+                    const docRef = doc(db, PRODUCTS_COLLECTION, product.id);
+                    batch.set(docRef, {
+                        ...toFirestoreProduct(product),
+                        synced_at: serverTimestamp(),
+                    });
+                }
+
+                await batch.commit();
+            });
+
             synced += batchProducts.length;
             console.log(`Batch synced: ${synced}/${products.length} products`);
         }
@@ -171,13 +412,17 @@ export const syncAllProductsToFirestore = async (products: Product[]): Promise<{
     } catch (error) {
         console.error("Bulk sync failed:", error);
         failed = products.length - synced;
+        dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
         return { success: false, synced, failed };
+    } finally {
+        dispatchSyncEnd();
     }
 };
 
 /**
  * Update only the stock quantity in Firestore
  * More efficient for quantity-only updates
+ * Uses retry logic for reliability
  */
 export const syncStockQuantityToFirestore = async (
     productId: string,
@@ -192,19 +437,58 @@ export const syncStockQuantityToFirestore = async (
     if (!db) return false;
 
     try {
-        const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-        await setDoc(
-            docRef,
-            {
-                quantity: newQuantity,
-                synced_at: serverTimestamp(),
-            },
-            { merge: true }
-        );
+        await withRetry(async () => {
+            const docRef = doc(db, PRODUCTS_COLLECTION, productId);
+            await setDoc(
+                docRef,
+                {
+                    quantity: newQuantity,
+                    updated_at: new Date().toISOString(),
+                    synced_at: serverTimestamp(),
+                },
+                { merge: true }
+            );
+        });
+        
         console.log(`Stock synced to Firestore: ${productId} -> ${newQuantity}`);
         return true;
     } catch (error) {
         console.error(`Failed to sync stock for ${productId}:`, error);
+        dispatchSyncError(error instanceof Error ? error : new Error(String(error)));
         return false;
     }
+};
+
+// ============================================
+// SYNC STATUS & UTILITIES
+// ============================================
+
+/**
+ * Get the current sync queue status
+ * Useful for debugging and monitoring
+ */
+export const getSyncQueueStatus = (): {
+    pending: number;
+    isProcessing: boolean;
+} => ({
+    pending: syncQueue.length,
+    isProcessing: isProcessingQueue,
+});
+
+/**
+ * Force process any pending sync operations
+ * Useful after coming back online
+ */
+export const flushSyncQueue = (): void => {
+    if (syncQueue.length > 0 && !isProcessingQueue) {
+        processQueue();
+    }
+};
+
+/**
+ * Check if Firestore sync is healthy
+ * Returns true if sync is enabled and no pending operations
+ */
+export const isSyncHealthy = (): boolean => {
+    return isFirestoreSyncEnabled() && syncQueue.length === 0;
 };
