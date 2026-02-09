@@ -1,7 +1,5 @@
 import {
-    AlertTriangle,
     Cloud,
-    Code2,
     Database,
     Edit2,
     HardDrive,
@@ -11,22 +9,18 @@ import {
     Settings as SettingsIcon,
     Sliders,
     Trash2,
-    Users,
-    Wand2
+    Users
 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { isFirestoreSyncEnabled } from "../db/firebase";
-import { clearAllProductsFromFirestore, syncAllProductsToFirestore } from "../db/firestoreSync";
-import { getDb } from "../db/index";
+import { syncAllProductsToFirestore } from "../db/firestoreSync";
 import { productService } from "../db/productService";
-import { isTauriRuntime } from "../db/runtime";
-import { seedService } from "../db/seedService";
 import { settingsService } from "../db/settingsService";
 import { User, userService } from "../db/userService";
 import { AppSettings, LowStockMethod } from "../types";
 import { Badge, Button, ConfirmModal, Input, useToast } from "./ui";
 
-type SettingsTab = "general" | "inventory" | "analytics" | "users" | "developer";
+type SettingsTab = "general" | "inventory" | "analytics" | "users";
 
 export const Settings: React.FC = () => {
     const toast = useToast();
@@ -35,12 +29,7 @@ export const Settings: React.FC = () => {
     const [settings, setSettings] = useState<AppSettings | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [seeding, setSeeding] = useState(false);
     const [syncing, setSyncing] = useState(false);
-    const [clearing, setClearing] = useState(false);
-    const [clearConfirm, setClearConfirm] = useState(false);
-    const [seedConfirm, setSeedConfirm] = useState(false);
-    const [hugeSeedConfirm, setHugeSeedConfirm] = useState(false);
 
     // User Management State
     const [users, setUsers] = useState<User[]>([]);
@@ -112,7 +101,6 @@ export const Settings: React.FC = () => {
         { id: "inventory", label: "Inventory", icon: Sliders },
         { id: "analytics", label: "Analytics", icon: Sliders },
         { id: "users", label: "Users", icon: Users },
-        { id: "developer", label: "Developer", icon: Code2 },
     ];
 
     const handleSyncToCloud = async () => {
@@ -141,209 +129,6 @@ export const Settings: React.FC = () => {
             toast.error("Sync Failed", error instanceof Error ? error.message : "Could not sync to cloud");
         } finally {
             setSyncing(false);
-        }
-    };
-
-    const handleSeedHugeData = async () => {
-        setHugeSeedConfirm(false);
-        setSeeding(true);
-        try {
-            if (!isTauriRuntime()) {
-                toast.error("Error", "Seeding only works in desktop app");
-                setSeeding(false);
-                return;
-            }
-
-            await seedService.seedHugeData((msg) => {
-                // We can use a toast or just let it spin. 
-                // For now, let's just log or maybe show a loading toast if possible? 
-                // Actually, let's just use console for progress to keep UI clean, 
-                // but the button will show loading.
-                console.log(msg);
-            });
-
-            toast.success("Huge Data Database Seeded", "Created 500+ products and ~2,000 invoices.");
-        } catch (error) {
-            console.error("Seed error:", error);
-            toast.error("Seed Failed", error instanceof Error ? error.message : "Could not seed database");
-        } finally {
-            setSeeding(false);
-        }
-    };
-
-    const handleSeedDatabase = async () => {
-        setSeedConfirm(false);
-        setSeeding(true);
-        try {
-            if (!isTauriRuntime()) {
-                toast.error("Error", "Seeding only works in desktop app");
-                setSeeding(false);
-                return;
-            }
-
-            const db = await getDb();
-
-            // Generate unique ID helper
-            const genId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-            // Sample product categories
-            const categories = ['Brake Parts', 'Engine Parts', 'Suspension', 'Electrical', 'Filters', 'Transmission'];
-            const productNames = [
-                'Brake Pad Set', 'Brake Disc', 'Brake Caliper', 'Brake Fluid',
-                'Air Filter', 'Oil Filter', 'Fuel Filter', 'Cabin Filter',
-                'Spark Plug', 'Ignition Coil', 'Alternator', 'Starter Motor',
-                'Shock Absorber', 'Strut Mount', 'Control Arm', 'Ball Joint',
-                'Clutch Kit', 'Flywheel', 'Gear Oil', 'Transmission Mount',
-                'Battery', 'Headlight Bulb', 'Fuse Box', 'Relay Switch'
-            ];
-
-            // Insert sample products
-            const insertedProductIds: string[] = [];
-            for (let i = 0; i < productNames.length; i++) {
-                const id = genId('PROD');
-                const name = productNames[i];
-                const category = categories[Math.floor(i / 4) % categories.length];
-                const price = Math.floor(Math.random() * 5000) + 200;
-                const costPrice = Math.floor(price * 0.7);
-                const quantity = Math.floor(Math.random() * 100) + 5;
-                const reorderLevel = Math.floor(Math.random() * 10) + 5;
-                const barcode = `88${String(100000 + i).padStart(10, '0')}`;
-                const sku = `SKU-${category.substring(0, 3).toUpperCase()}-${String(i + 1).padStart(4, '0')}`;
-
-                await db.execute(
-                    `INSERT INTO products (id, name, category, price, purchase_price, quantity, reorder_level, barcode, sku, fsn_classification, created_at) 
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'F', datetime('now'))`,
-                    [id, name, category, price, costPrice, quantity, reorderLevel, barcode, sku]
-                );
-                insertedProductIds.push(id);
-            }
-
-            // Insert sample invoices with items
-            const customerNames = ['Walking Customer', 'Raj Motors', 'ABC Garage', 'Quick Fix Auto', 'Premier Service'];
-            for (let i = 0; i < 15; i++) {
-                const invoiceId = genId('INV');
-                const customer = customerNames[Math.floor(Math.random() * customerNames.length)];
-                const daysAgo = Math.floor(Math.random() * 30);
-                const invoiceDate = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
-
-                // Pick random products from inserted ones
-                const shuffled = [...insertedProductIds].sort(() => Math.random() - 0.5);
-                const selectedProductIds = shuffled.slice(0, 3);
-
-                // Get product details
-                interface ProductRow { id: string; name: string; price: number; purchase_price: number }
-                const productsData: ProductRow[] = [];
-                for (const prodId of selectedProductIds) {
-                    const rows = await db.select<ProductRow[]>(
-                        "SELECT id, name, price, purchase_price FROM products WHERE id = $1",
-                        [prodId]
-                    );
-                    if (rows.length > 0) productsData.push(rows[0]);
-                }
-
-                let totalAmount = 0;
-                const items: { productId: string; name: string; qty: number; price: number; costPrice: number }[] = [];
-
-                for (const prod of productsData) {
-                    const qty = Math.floor(Math.random() * 3) + 1;
-                    totalAmount += prod.price * qty;
-                    items.push({ productId: prod.id, name: prod.name, qty, price: prod.price, costPrice: prod.purchase_price || Math.floor(prod.price * 0.7) });
-                }
-
-                await db.execute(
-                    `INSERT INTO invoices (id, customer_name, discount_amount, total_amount, created_at, is_return) 
-                     VALUES ($1, $2, 0, $3, $4, 0)`,
-                    [invoiceId, customer, totalAmount, invoiceDate]
-                );
-
-                for (const item of items) {
-                    const itemId = genId('ITEM');
-                    await db.execute(
-                        `INSERT INTO invoice_items (id, invoice_id, product_id, quantity, price, cost_price) 
-                         VALUES ($1, $2, $3, $4, $5, $6)`,
-                        [itemId, invoiceId, item.productId, item.qty, item.price, item.costPrice]
-                    );
-                }
-
-                // Store invoice info for later use in returns
-                if (i < 3) {
-                    // We'll create returns for first 3 invoices
-                    const returnId = genId('RET');
-                    const returnNo = `RET-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(i + 1).padStart(3, '0')}`;
-                    const returnItem = items[0]; // Return first item only
-                    const returnAmount = returnItem.price * 1; // Return quantity of 1
-
-                    await db.execute(
-                        `INSERT INTO sales_returns (id, return_no, invoice_id, return_date, reason, total_amount, notes, status, created_at, updated_at) 
-                         VALUES ($1, $2, $3, datetime('now'), 'customer_request', $4, 'Sample return for testing', 'completed', datetime('now'), datetime('now'))`,
-                        [returnId, returnNo, invoiceId, returnAmount]
-                    );
-
-                    // Create return item
-                    const returnItemId = genId('RI');
-                    await db.execute(
-                        `INSERT INTO return_items (id, return_id, product_id, quantity, rate, line_total) 
-                         VALUES ($1, $2, $3, 1, $4, $4)`,
-                        [returnItemId, returnId, returnItem.productId, returnItem.price]
-                    );
-
-                    // Increase product stock (return adds stock back)
-                    await db.execute(
-                        `UPDATE products SET quantity = quantity + 1 WHERE id = $1`,
-                        [returnItem.productId]
-                    );
-                }
-            }
-
-            toast.success("Database Seeded", `Created ${productNames.length} products, 15 invoices, and 3 sample returns`);
-        } catch (error) {
-            console.error("Seed error:", error);
-            toast.error("Seed Failed", error instanceof Error ? error.message : "Could not seed database");
-        } finally {
-            setSeeding(false);
-        }
-    };
-
-    const handleClearDatabase = async () => {
-        setClearConfirm(false);
-        setClearing(true);
-        try {
-            if (!isTauriRuntime()) {
-                throw new Error("Clear only works in desktop app");
-            }
-
-            const db = await getDb();
-
-            // Clear all data tables (keep settings and backup_log)
-            await db.execute("DELETE FROM return_items");
-            await db.execute("DELETE FROM sales_returns");
-            await db.execute("DELETE FROM invoice_items");
-            await db.execute("DELETE FROM invoices");
-            await db.execute("DELETE FROM stock_adjustments");
-            await db.execute("DELETE FROM products");
-
-            // Clear Firestore products to keep PWA in sync
-            if (isFirestoreSyncEnabled()) {
-                try {
-                    const cleared = await clearAllProductsFromFirestore();
-                    if (cleared) {
-                        toast.success("Database & Cloud Cleared", "All products, invoices, returns, and stock adjustments have been deleted from local and cloud storage");
-                    } else {
-                        toast.success("Database Cleared", "Local data cleared. Cloud sync was skipped (not configured).");
-                    }
-                } catch (cloudError) {
-                    console.error("Failed to clear cloud data:", cloudError);
-                    const errorMsg = cloudError instanceof Error ? cloudError.message : "Unknown error";
-                    toast.warning("Partial Clear", `Local database cleared but cloud sync failed: ${errorMsg}`);
-                }
-            } else {
-                toast.success("Database Cleared", "All products, invoices, returns, and stock adjustments have been deleted");
-            }
-        } catch (error) {
-            console.error(error);
-            toast.error("Clear Failed", error instanceof Error ? error.message : "Could not clear database");
-        } finally {
-            setClearing(false);
         }
     };
 
@@ -492,6 +277,31 @@ export const Settings: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+
+                        {/* Cloud Sync Section */}
+                        <div className="border-t border-slate-100 pt-8">
+                            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6">
+                                <div className="flex items-start gap-4">
+                                    <div className="p-3 bg-emerald-100 rounded-xl text-emerald-600">
+                                        <Cloud size={24} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h4 className="font-bold text-emerald-900 mb-2">Cloud Sync</h4>
+                                        <p className="text-sm text-emerald-800 mb-4">
+                                            Push all local products to Firebase Firestore for PWA access. This syncs your entire inventory to the cloud.
+                                        </p>
+                                        <Button
+                                            onClick={handleSyncToCloud}
+                                            isLoading={syncing}
+                                            leftIcon={<Cloud size={18} />}
+                                            className="bg-emerald-600 hover:bg-emerald-700"
+                                        >
+                                            {syncing ? "Syncing..." : "Sync Products to Cloud"}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -627,102 +437,6 @@ export const Settings: React.FC = () => {
                     </div>
                 )}
 
-                {activeTab === "developer" && (
-                    <div className="space-y-8 max-w-2xl">
-                        <div>
-                            <h3 className="text-lg font-bold text-slate-800 mb-2">Developer Tools</h3>
-                            <p className="text-sm text-slate-500 mb-6">These tools are for development and testing purposes only.</p>
-
-                            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 mb-6">
-                                <div className="flex items-start gap-4">
-                                    <div className="p-3 bg-blue-100 rounded-xl text-blue-600">
-                                        <Wand2 size={24} />
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="font-bold text-blue-900 mb-2">Seed Sample Data</h4>
-                                        <p className="text-sm text-blue-800 mb-4">
-                                            Populate the database with sample products, invoices, and related data for testing all features.
-                                        </p>
-                                        <Button
-                                            onClick={() => setSeedConfirm(true)}
-                                            isLoading={seeding}
-                                            leftIcon={<Database size={18} />}
-                                            className="bg-blue-600 hover:bg-blue-700"
-                                        >
-                                            Seed Database
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 mb-6">
-                                <div className="flex items-start gap-4">
-                                    <div className="p-3 bg-indigo-100 rounded-xl text-indigo-600">
-                                        <Database size={24} />
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="font-bold text-indigo-900 mb-2">Seed Huge Data</h4>
-                                        <p className="text-sm text-indigo-800 mb-4">
-                                            Populate with massive dataset (500 products, 2000+ invoices) for performance testing.
-                                        </p>
-                                        <Button
-                                            onClick={() => setHugeSeedConfirm(true)}
-                                            isLoading={seeding}
-                                            leftIcon={<Wand2 size={18} />}
-                                            className="bg-indigo-600 hover:bg-indigo-700"
-                                        >
-                                            Seed Huge Data
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6 mb-6">
-                                <div className="flex items-start gap-4">
-                                    <div className="p-3 bg-emerald-100 rounded-xl text-emerald-600">
-                                        <Cloud size={24} />
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="font-bold text-emerald-900 mb-2">Sync to Cloud</h4>
-                                        <p className="text-sm text-emerald-800 mb-4">
-                                            Push all local products to Firebase Firestore for PWA access. This syncs your entire inventory to the cloud.
-                                        </p>
-                                        <Button
-                                            onClick={handleSyncToCloud}
-                                            isLoading={syncing}
-                                            leftIcon={<Cloud size={18} />}
-                                            className="bg-emerald-600 hover:bg-emerald-700"
-                                        >
-                                            {syncing ? "Syncing..." : "Sync Products to Cloud"}
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
-                                <div className="flex items-start gap-4">
-                                    <div className="p-3 bg-red-100 rounded-xl text-red-600">
-                                        <AlertTriangle size={24} />
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="font-bold text-red-900 mb-2">Danger Zone</h4>
-                                        <p className="text-sm text-red-800 mb-4">
-                                            This will permanently delete all products, invoices, sales returns, and stock adjustments. Settings and backups will be preserved.
-                                        </p>
-                                        <Button
-                                            onClick={() => setClearConfirm(true)}
-                                            isLoading={clearing}
-                                            leftIcon={<Trash2 size={18} />}
-                                            className="bg-red-600 hover:bg-red-700"
-                                        >
-                                            Clear All Data
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {activeTab === "users" && (
                     <div className="space-y-6 max-w-4xl">
@@ -817,27 +531,6 @@ export const Settings: React.FC = () => {
                 )}
             </div>
 
-            {/* Seed Confirmation Modal */}
-            <ConfirmModal
-                isOpen={seedConfirm}
-                onClose={() => setSeedConfirm(false)}
-                onConfirm={handleSeedDatabase}
-                title="Seed Database?"
-                message="This will add sample products, invoices, and related data to your database. Existing data will NOT be deleted. Continue?"
-                confirmText="Yes, Seed Data"
-                variant="info"
-            />
-
-            {/* Clear Confirmation Modal */}
-            <ConfirmModal
-                isOpen={clearConfirm}
-                onClose={() => setClearConfirm(false)}
-                onConfirm={handleClearDatabase}
-                title="Clear All Data?"
-                message="This will PERMANENTLY DELETE all products, invoices, sales returns, and stock adjustments. This action cannot be undone. Are you absolutely sure?"
-                confirmText="Yes, Delete Everything"
-                variant="danger"
-            />
 
             {/* User Create/Edit Modal */}
             {userModalOpen && (
@@ -1008,16 +701,6 @@ export const Settings: React.FC = () => {
                 variant="danger"
             />
 
-            {/* Huge Seed Confirmation Modal */}
-            <ConfirmModal
-                isOpen={hugeSeedConfirm}
-                onClose={() => setHugeSeedConfirm(false)}
-                onConfirm={handleSeedHugeData}
-                title="Seed Huge Data?"
-                message="This will add 500+ products and ~2,000 invoices to your database. This process may take a few seconds. Do you want to continue?"
-                confirmText="Yes, Seed Data"
-                variant="info"
-            />
         </div>
     );
 };
