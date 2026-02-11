@@ -50,4 +50,8 @@
     "shortDescription": "Auto parts billing and inventory management",
     "longDescription": "MotorMods is an offline-first billing and stock management system designed for small auto parts stores. Features include POS billing, inventory management, invoicing, and local backups."
   }
+  ,
+  "plugins": {
+    "opener": {}
+  }
 }

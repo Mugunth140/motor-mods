@@ -57,10 +57,16 @@ const ensureSchema = async (database: Database) => {
   await database.execute(`
     CREATE TABLE IF NOT EXISTS invoices (
       id TEXT PRIMARY KEY,
+      invoice_number TEXT UNIQUE,
+      date TEXT,
       customer_name TEXT NOT NULL,
       customer_phone TEXT,
+      subtotal REAL NOT NULL DEFAULT 0,
       discount_amount REAL NOT NULL DEFAULT 0,
       total_amount REAL NOT NULL,
+      grand_total REAL NOT NULL DEFAULT 0,
+      items TEXT,
+      status TEXT DEFAULT 'paid',
       payment_mode TEXT DEFAULT 'cash',
       is_return INTEGER DEFAULT 0,
       original_invoice_id TEXT,
@@ -84,15 +90,6 @@ const ensureSchema = async (database: Database) => {
       FOREIGN KEY(product_id) REFERENCES products(id)
     )
   `);
-
-  // Indexes for Core Tables
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku)");
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)");
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)");
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_products_last_sale_date ON products(last_sale_date)");
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)");
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_invoice_items_product ON invoice_items(product_id)");
-  await database.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at)");
 
   // ============================================
   // SETTINGS TABLE
@@ -266,11 +263,29 @@ const ensureSchema = async (database: Database) => {
   if (!invoiceColNames.has("discount_amount")) {
     await database.execute("ALTER TABLE invoices ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0");
   }
+  if (!invoiceColNames.has("invoice_number")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN invoice_number TEXT");
+  }
+  if (!invoiceColNames.has("date")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN date TEXT");
+  }
+  if (!invoiceColNames.has("subtotal")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN subtotal REAL NOT NULL DEFAULT 0");
+  }
   if (!invoiceColNames.has("customer_phone")) {
     await database.execute("ALTER TABLE invoices ADD COLUMN customer_phone TEXT");
   }
   if (!invoiceColNames.has("payment_mode")) {
     await database.execute("ALTER TABLE invoices ADD COLUMN payment_mode TEXT DEFAULT 'cash'");
+  }
+  if (!invoiceColNames.has("grand_total")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN grand_total REAL NOT NULL DEFAULT 0");
+  }
+  if (!invoiceColNames.has("items")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN items TEXT");
+  }
+  if (!invoiceColNames.has("status")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN status TEXT DEFAULT 'paid'");
   }
   if (!invoiceColNames.has("is_return")) {
     await database.execute("ALTER TABLE invoices ADD COLUMN is_return INTEGER DEFAULT 0");
@@ -290,12 +305,16 @@ const ensureSchema = async (database: Database) => {
     await database.execute("ALTER TABLE invoice_items ADD COLUMN cost_price REAL NOT NULL DEFAULT 0");
   }
 
-  // Create any missing indexes
+  // Create any missing indexes (after migrations)
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku)");
   await database.execute("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)");
   await database.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)");
   await database.execute("CREATE INDEX IF NOT EXISTS idx_products_last_sale_date ON products(last_sale_date)");
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)");
   await database.execute("CREATE INDEX IF NOT EXISTS idx_invoice_items_product ON invoice_items(product_id)");
   await database.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at)");
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number)");
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(date)");
 };
 
 const migrateProductsSkuNullable = async (database: Database) => {

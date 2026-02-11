@@ -26,10 +26,16 @@ export type FSNClassification = 'F' | 'S' | 'N';
 
 export interface Invoice {
   id: string;
+  invoice_number?: string | null;
+  date?: string | null;
   customer_name: string | null;
   customer_phone?: string | null;
+  subtotal?: number;
   discount_amount: number;
   total_amount: number;
+  grand_total?: number;
+  items?: string | null;
+  status?: 'pending' | 'paid';
   payment_mode?: PaymentMode;
   is_return?: boolean;
   original_invoice_id?: string | null;
@@ -51,6 +57,25 @@ export interface InvoiceItem {
 
 export interface InvoiceWithItems extends Invoice {
   items: InvoiceItem[];
+}
+
+export interface InvoiceRecordItem {
+  name: string;
+  qty: number;
+  rate: number;
+  total: number;
+}
+
+export interface InvoiceRecord {
+  id: string;
+  invoice_number: string;
+  date: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  subtotal: number;
+  grand_total: number;
+  items: InvoiceRecordItem[];
+  status: 'pending' | 'paid';
 }
 
 // ============================================

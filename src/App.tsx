@@ -3,7 +3,7 @@ import "./App.css";
 import { BackupRestore } from "./components/BackupRestore";
 import { Billing } from "./components/Billing";
 import { Dashboard } from "./components/Dashboard";
-import { Invoices } from "./components/Invoices";
+import { InvoicesList } from "./components/InvoicesList";
 import { Layout } from "./components/Layout";
 import { Login } from "./components/Login";
 import { Reports } from "./components/reports/Reports";
@@ -53,7 +53,7 @@ function AppContent() {
       case "returns":
         return <SalesReturns userRole={session?.role} userName={session?.name} />;
       case "invoices":
-        return <Invoices />;
+        return <InvoicesList />;
       case "reports":
         return <Reports />;
       case "backups":

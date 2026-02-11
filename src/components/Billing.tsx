@@ -1,23 +1,24 @@
 import {
-  Check,
-  CreditCard,
-  Keyboard,
-  Minus,
-  Package,
-  Plus,
-  Search,
-  ShoppingCart,
-  Trash2,
-  User,
-  X
+    Check,
+    CreditCard,
+    Keyboard,
+    Minus,
+    Package,
+    Plus,
+    Search,
+    ShoppingCart,
+    Trash2,
+    User,
+    X
 } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
+import { VirtuosoGrid } from 'react-virtuoso';
 import { v4 as uuidv4 } from "uuid";
+import { invoiceManagementService } from "../db/invoiceManagementService";
 import { invoiceService } from "../db/invoiceService";
 import { useDebounce, useKeyboardShortcut, useProducts } from "../hooks";
 import { CartItem, InvoiceItem, Product } from "../types";
 import { Badge, Button, ConfirmModal, useToast } from "./ui";
-import { VirtuosoGrid } from 'react-virtuoso';
 
 export const Billing: React.FC = () => {
   const { products, loading, refetch } = useProducts();
@@ -208,10 +209,35 @@ export const Billing: React.FC = () => {
         invoiceItems
       );
 
+      let invoiceNumberLabel = invoiceId.slice(0, 8).toUpperCase();
+      try {
+        const record = await invoiceManagementService.saveInvoiceRecord({
+          invoiceId,
+          customerName: customerName.trim() || "Walking Customer",
+          customerPhone: customerPhone.trim() || null,
+          subtotal: subtotalAmount,
+          grandTotal: totalAmount,
+          discountAmount: discountAmount,
+          items: cart.map((item) => ({
+            name: item.name,
+            qty: item.cartQuantity,
+            rate: item.price,
+            total: item.cartQuantity * item.price,
+          })),
+          status: "paid",
+          paymentMode: "cash",
+          createdAt: new Date().toISOString(),
+        });
+        invoiceNumberLabel = record.invoice_number;
+      } catch (error) {
+        console.error(error);
+        toast.warning("Invoice PDF Failed", "Bill saved, but invoice PDF could not be generated");
+      }
+
       // Show success message
       toast.success(
         "Invoice Created",
-        `Invoice #${invoiceId.slice(0, 8).toUpperCase()} for ₹${totalAmount.toLocaleString()}`
+        `Invoice #${invoiceNumberLabel} for ₹${totalAmount.toLocaleString()}`
       );
 
       // Clear cart and UI immediately
@@ -349,7 +375,7 @@ export const Billing: React.FC = () => {
                         </Badge>
                       </div>
 
-                      <div className="flex-1 min-h-[3rem]">
+                      <div className="flex-1 min-h-12">
                         <h3 className="font-bold text-slate-800 line-clamp-2 leading-snug mb-1 group-hover:text-indigo-700 transition-colors text-sm">{p.name}</h3>
                         <p className="text-[10px] text-slate-400 font-mono tracking-wide">{p.sku || "NO SKU"}</p>
                       </div>
