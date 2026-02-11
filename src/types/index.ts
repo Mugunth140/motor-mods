@@ -55,9 +55,9 @@ export interface InvoiceItem {
   cost_price: number;
 }
 
-export interface InvoiceWithItems extends Invoice {
+export type InvoiceWithItems = Omit<Invoice, 'items'> & {
   items: InvoiceItem[];
-}
+};
 
 export interface InvoiceRecordItem {
   name: string;

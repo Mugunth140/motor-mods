@@ -64,11 +64,16 @@ export const InvoicesList: React.FC = () => {
       return;
     }
     await shareInvoiceOnWhatsApp(invoice);
-    toast.success("WhatsApp opened with invoice", "Message ready to send");
+    toast.success("WhatsApp opened", "WhatsApp draft opened with invoice details and attachment.");
   };
 
   const handlePrint = async () => {
     await message("Printer not configured", { title: "Print", kind: "warning" });
+  };
+
+  const handleInvoiceUpdated = (updated: InvoiceRecord) => {
+    setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
+    setSelectedInvoice(updated);
   };
 
   if (loading) {
@@ -212,7 +217,7 @@ export const InvoicesList: React.FC = () => {
 
       <Modal isOpen={!!selectedInvoice} onClose={() => setSelectedInvoice(null)} title="Invoice Preview" size="lg">
         {selectedInvoice && (
-          <InvoiceView invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} />
+          <InvoiceView invoice={selectedInvoice} onInvoiceUpdated={handleInvoiceUpdated} />
         )}
       </Modal>
     </div>

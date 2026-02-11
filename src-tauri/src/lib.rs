@@ -581,6 +581,61 @@ fn print_receipt(text: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn share_whatsapp_with_attachment(deeplink_url: String, pdf_path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let pdf_file = std::path::Path::new(&pdf_path);
+        if !pdf_file.exists() {
+            return Err(format!("PDF file not found: {}", pdf_path));
+        }
+
+        let escaped_pdf_path = pdf_path.replace('\'', "''");
+        let escaped_deeplink = deeplink_url.replace('\'', "''");
+
+        // Requires STA for clipboard access. It preloads the file into clipboard,
+        // opens WhatsApp chat deeplink, then pastes attachment into composer.
+        let script = format!(
+            r#"
+Add-Type -AssemblyName System.Windows.Forms
+$path = '{0}'
+if (-not (Test-Path $path)) {{ throw 'Invoice PDF not found' }}
+$files = New-Object System.Collections.Specialized.StringCollection
+[void]$files.Add($path)
+[System.Windows.Forms.Clipboard]::SetFileDropList($files)
+Start-Process '{1}'
+Start-Sleep -Milliseconds 2200
+[System.Windows.Forms.SendKeys]::SendWait('^v')
+"#,
+            escaped_pdf_path, escaped_deeplink
+        );
+
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", &script])
+            .output()
+            .map_err(|e| format!("Failed to run WhatsApp share script: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let details = if !stderr.trim().is_empty() {
+                stderr.to_string()
+            } else {
+                stdout.to_string()
+            };
+            return Err(format!("WhatsApp share failed: {}", details.trim()));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (deeplink_url, pdf_path);
+        Err("Auto-attach is currently supported only on Windows desktop builds.".to_string())
+    }
+}
+
 // ============================================
 // SILENT PDF PRINTING (Windows only, using SumatraPDF)
 // ============================================
@@ -670,7 +725,8 @@ pub fn run() {
             restore_data_from_backup,
             restore_data_from_backup_file,
             print_receipt,
-            print_pdf_silent
+            print_pdf_silent,
+            share_whatsapp_with_attachment
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

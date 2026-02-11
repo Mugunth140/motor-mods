@@ -1,63 +1,289 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { settingsService } from "../db/settingsService";
 import { InvoiceRecord } from "../types";
 import { getInvoiceFilename } from "./getInvoicePath";
 
-export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{ bytes: Uint8Array; filename: string }> => {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+const formatCurrency = (amount: number): string => {
+  return new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
 
-  const margin = 14;
-  let y = margin;
+const asAmount = (amount: number): string => formatCurrency(amount);
+
+const formatInvoiceDate = (isoDate: string): string => {
+  return new Date(isoDate).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const loadLogoAsDataUrl = async (): Promise<string | null> => {
+  try {
+    const response = await fetch("/logo.png", { cache: "no-cache" });
+    if (!response.ok) return null;
+
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read logo"));
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+};
+
+const getStoreName = (name: string) => {
+  const trimmed = name.trim();
+  if (!trimmed) return "Motor Mods";
+  return trimmed;
+};
+
+const drawInvoiceDetailRow = (
+  doc: jsPDF,
+  x: number,
+  y: number,
+  label: string,
+  value: string,
+  valueColor: [number, number, number] = [15, 23, 42]
+) => {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(label, x, y);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("INVOICE", margin, y);
+  doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+  doc.text(value, x + 26, y);
+};
 
-  doc.setFontSize(10);
+const drawFooter = (
+  doc: jsPDF,
+  pageWidth: number,
+  pageHeight: number,
+  margin: number,
+  footerText: string,
+  pageNo: number,
+  totalPages: number
+) => {
+  const footerY = pageHeight - 10;
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+
   doc.setFont("helvetica", "normal");
-  y += 8;
+  doc.setFontSize(8.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(footerText, margin, footerY);
+  doc.text(`Page ${pageNo} of ${totalPages}`, pageWidth - margin, footerY, { align: "right" });
+};
 
-  doc.text(`Invoice #: ${invoice.invoice_number}`, margin, y);
-  doc.text(`Date: ${new Date(invoice.date).toLocaleString("en-IN")}`, margin + 90, y);
-  y += 6;
+export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{ bytes: Uint8Array; filename: string }> => {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const settings = await settingsService.getAll();
+  const logoDataUrl = await loadLogoAsDataUrl();
 
-  doc.text(`Customer: ${invoice.customer_name || "Walking Customer"}`, margin, y);
-  if (invoice.customer_phone) {
-    doc.text(`Phone: ${invoice.customer_phone}`, margin + 90, y);
+  const margin = 14;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  const storeName = getStoreName(settings.store_name || "Motor Mods");
+  const invoiceDate = formatInvoiceDate(invoice.date);
+  const statusText = invoice.status === "pending" ? "PENDING" : "PAID";
+  const customerName = invoice.customer_name?.trim() || "Walking Customer";
+  const customerPhone = invoice.customer_phone?.trim() || "-";
+
+  const storeAddress = settings.store_address?.trim() || "";
+  const storeContact = [settings.store_phone, settings.store_email].filter(Boolean).join("  |  ");
+
+  const subtotal = invoice.subtotal > 0
+    ? invoice.subtotal
+    : invoice.items.reduce((sum, item) => sum + item.total, 0);
+  const discount = Math.max(0, subtotal - invoice.grand_total);
+
+  const invoiceInfoWidth = 72;
+  const invoiceInfoX = pageWidth - margin - invoiceInfoWidth;
+  const logoSize = logoDataUrl ? 30 : 0;
+  const leftStartX = logoDataUrl ? margin + logoSize + 6 : margin;
+  const leftMaxWidth = invoiceInfoX - leftStartX - 6;
+
+  let y = 16;
+
+  if (logoDataUrl) {
+    doc.addImage(logoDataUrl, "PNG", margin, y - 2, logoSize, logoSize);
   }
-  y += 6;
 
-  const tableBody = invoice.items.map((item, idx) => [
-    String(idx + 1),
-    item.name,
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(15, 23, 42);
+  doc.text(storeName, leftStartX, y + 6);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+
+  let leftY = y + 12;
+  if (storeAddress) {
+    const addressLines = doc.splitTextToSize(storeAddress, leftMaxWidth);
+    for (const line of addressLines) {
+      doc.text(line, leftStartX, leftY);
+      leftY += 4.2;
+    }
+  }
+  if (storeContact) {
+    doc.text(storeContact, leftStartX, leftY);
+    leftY += 4.2;
+  }
+
+  const infoBoxY = y - 1;
+  const infoBoxHeight = 33;
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(invoiceInfoX, infoBoxY, invoiceInfoWidth, infoBoxHeight, 2, 2, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text("INVOICE", invoiceInfoX + 4, infoBoxY + 7);
+
+  drawInvoiceDetailRow(doc, invoiceInfoX + 4, infoBoxY + 13, "No", invoice.invoice_number);
+  drawInvoiceDetailRow(doc, invoiceInfoX + 4, infoBoxY + 19, "Date", invoiceDate);
+
+  const statusColor: [number, number, number] = invoice.status === "pending"
+    ? [202, 138, 4]
+    : [22, 163, 74];
+  drawInvoiceDetailRow(doc, invoiceInfoX + 4, infoBoxY + 25, "Status", statusText, statusColor);
+
+  const headerBottom = Math.max(
+    infoBoxY + infoBoxHeight,
+    leftY,
+    logoDataUrl ? y - 2 + logoSize : y
+  );
+
+  y = headerBottom + 8;
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 7;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(71, 85, 105);
+  doc.text("BILL TO", margin, y);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text(customerName, margin, y + 7);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Phone: ${customerPhone}`, pageWidth - margin, y + 7, { align: "right" });
+
+  y += 12;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 5;
+
+  const tableRows = invoice.items.map((item, index) => [
+    String(index + 1),
+    item.name || "-",
     String(item.qty),
-    `₹${item.rate.toLocaleString("en-IN")}`,
-    `₹${item.total.toLocaleString("en-IN")}`,
+    asAmount(item.rate),
+    asAmount(item.total),
   ]);
 
   autoTable(doc, {
-    startY: y + 4,
-    head: [["#", "Item", "Qty", "Rate", "Total"]],
-    body: tableBody,
+    startY: y,
+    head: [["#", "Description", "Qty", "Rate", "Amount"]],
+    body: tableRows,
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: [20, 184, 166], textColor: [255, 255, 255], halign: "center" },
+    margin: { left: margin, right: margin },
+    tableLineColor: [226, 232, 240],
+    tableLineWidth: 0.2,
+    styles: {
+      font: "helvetica",
+      fontSize: 9,
+      cellPadding: 3,
+      textColor: [30, 41, 59],
+      lineColor: [226, 232, 240],
+      lineWidth: 0.2,
+    },
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+      halign: "center",
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252],
+    },
     columnStyles: {
       0: { cellWidth: 10, halign: "center" },
-      2: { cellWidth: 15, halign: "center" },
-      3: { cellWidth: 25, halign: "right" },
-      4: { cellWidth: 25, halign: "right" },
+      1: { cellWidth: 96 },
+      2: { cellWidth: 16, halign: "center" },
+      3: { cellWidth: 30, halign: "right" },
+      4: { cellWidth: 30, halign: "right" },
     },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const finalY = (doc as any).lastAutoTable.finalY || y + 20;
-  const totalY = finalY + 8;
+  const lastAutoTable = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
+  let blockY = (lastAutoTable?.finalY || y) + 9;
+
+  const totalsBoxWidth = 76;
+  const totalsBoxHeight = 30;
+  const totalsX = pageWidth - margin - totalsBoxWidth;
+
+  if (blockY + totalsBoxHeight > pageHeight - 24) {
+    doc.addPage();
+    blockY = margin + 6;
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Thank you for your business.", margin, blockY + 2);
+  doc.text("Please keep this invoice for warranty and service references.", margin, blockY + 7);
+  doc.text("All amounts are in INR.", margin, blockY + 12);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(totalsX, blockY, totalsBoxWidth, totalsBoxHeight, 2, 2, "FD");
+
+  let rowY = blockY + 7;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Subtotal", totalsX + 4, rowY);
+  doc.text(asAmount(subtotal), totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+
+  rowY += 6;
+  doc.text("Discount", totalsX + 4, rowY);
+  doc.text(`- ${asAmount(discount)}`, totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+
+  rowY += 6;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(totalsX + 4, rowY - 3, totalsX + totalsBoxWidth - 4, rowY - 3);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("Grand Total", margin + 120, totalY);
-  doc.text(`₹${invoice.grand_total.toLocaleString("en-IN")}`, margin + 160, totalY, { align: "right" });
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Grand Total (INR)", totalsX + 4, rowY + 1.5);
+  doc.text(asAmount(invoice.grand_total), totalsX + totalsBoxWidth - 4, rowY + 1.5, { align: "right" });
+
+  const footerText = storeAddress || storeContact || storeName;
+  const totalPages = doc.getNumberOfPages();
+  for (let page = 1; page <= totalPages; page += 1) {
+    doc.setPage(page);
+    drawFooter(doc, pageWidth, pageHeight, margin, footerText, page, totalPages);
+  }
 
   const arrayBuffer = doc.output("arraybuffer");
   const bytes = new Uint8Array(arrayBuffer);

@@ -29,6 +29,8 @@
     "fs:allow-temp-write",
     "fs:allow-appdata-read",
     "fs:allow-appdata-write",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
     "fs:allow-appcache-read",
     "fs:allow-appcache-write",
     "fs:allow-download-read",

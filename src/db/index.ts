@@ -1,12 +1,20 @@
 import Database from "@tauri-apps/plugin-sql";
 
 let db: Database | null = null;
+let dbInitPromise: Promise<Database> | null = null;
 
 /**
  * Closes the current database connection and clears the cached instance.
  * Call this before restore operations to ensure the new database file is used.
  */
 export const closeDatabase = async (): Promise<void> => {
+  if (dbInitPromise) {
+    try {
+      await dbInitPromise;
+    } catch {
+      // ignore pending init errors while closing
+    }
+  }
   if (db) {
     try {
       await db.close();
@@ -15,6 +23,7 @@ export const closeDatabase = async (): Promise<void> => {
     }
     db = null;
   }
+  dbInitPromise = null;
 };
 
 /**
@@ -368,10 +377,23 @@ const migrateProductsSkuNullable = async (database: Database) => {
 export const getDb = async () => {
   if (db) return db;
 
-  // Use the plugin-managed SQLite path (app data dir) consistently.
-  // This also matches the connection name used by the Tauri plugin.
-  db = await Database.load("sqlite:motormods.db");
-  await ensureSchema(db);
-  await migrateProductsSkuNullable(db);
-  return db;
+  if (dbInitPromise) {
+    return dbInitPromise;
+  }
+
+  dbInitPromise = (async () => {
+    // Use the plugin-managed SQLite path (app data dir) consistently.
+    // This also matches the connection name used by the Tauri plugin.
+    const loadedDb = await Database.load("sqlite:motormods.db");
+    await ensureSchema(loadedDb);
+    await migrateProductsSkuNullable(loadedDb);
+    db = loadedDb;
+    return loadedDb;
+  })();
+
+  try {
+    return await dbInitPromise;
+  } finally {
+    dbInitPromise = null;
+  }
 };

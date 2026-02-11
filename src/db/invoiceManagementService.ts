@@ -1,7 +1,7 @@
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { BaseDirectory, mkdir, writeFile } from "@tauri-apps/plugin-fs";
 import { InvoiceRecord, InvoiceRecordItem, PaymentMode } from "../types";
 import { generateInvoicePdfBytes } from "../utils/generatePDF";
-import { getInvoicePdfPath } from "../utils/getInvoicePath";
+import { getInvoiceFilename } from "../utils/getInvoicePath";
 import { getDb } from "./index";
 import { isTauriRuntime } from "./runtime";
 
@@ -45,6 +45,15 @@ const generateInvoiceNumberLocal = (records: InvoiceRecord[], iso: string) => {
   const todaysCount = records.filter((r) => r.invoice_number.startsWith(dateKey)).length;
   const seq = String(todaysCount + 1).padStart(3, "0");
   return `${dateKey}-${seq}`;
+};
+
+const persistInvoicePdf = async (record: InvoiceRecord) => {
+  if (!isTauriRuntime()) return;
+
+  const { bytes } = await generateInvoicePdfBytes(record);
+  const filename = getInvoiceFilename(record.invoice_number);
+  await mkdir("invoices", { baseDir: BaseDirectory.AppConfig, recursive: true });
+  await writeFile(`invoices/${filename}`, bytes, { baseDir: BaseDirectory.AppConfig });
 };
 
 export const invoiceManagementService = {
@@ -142,11 +151,51 @@ export const invoiceManagementService = {
       status: params.status ?? "paid",
     };
 
-    const { bytes } = await generateInvoicePdfBytes(record);
-    const pdfPath = await getInvoicePdfPath(invoiceNumber);
-    await writeFile(pdfPath, bytes);
+    await persistInvoicePdf(record);
 
     return record;
+  },
+
+  async updateInvoiceCustomerDetails(params: {
+    invoiceId: string;
+    customerName: string | null;
+    customerPhone: string | null;
+  }): Promise<InvoiceRecord> {
+    const customerName = params.customerName?.trim() || "Walking Customer";
+    const customerPhone = normalizePhone(params.customerPhone);
+
+    if (!isTauriRuntime()) {
+      const records = loadLocalInvoices();
+      const index = records.findIndex((record) => record.id === params.invoiceId);
+      if (index < 0) {
+        throw new Error("Invoice not found");
+      }
+
+      const updated: InvoiceRecord = {
+        ...records[index],
+        customer_name: customerName,
+        customer_phone: customerPhone,
+      };
+      records[index] = updated;
+      saveLocalInvoices(records);
+      return updated;
+    }
+
+    const db = await getDb();
+    await db.execute(
+      `UPDATE invoices
+       SET customer_name = $1, customer_phone = $2
+       WHERE id = $3`,
+      [customerName, customerPhone, params.invoiceId]
+    );
+
+    const updated = await this.getInvoiceRecordById(params.invoiceId);
+    if (!updated) {
+      throw new Error("Invoice not found after update");
+    }
+
+    await persistInvoicePdf(updated);
+    return updated;
   },
 
   async getInvoiceRecords(): Promise<InvoiceRecord[]> {
