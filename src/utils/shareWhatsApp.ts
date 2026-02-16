@@ -1,8 +1,7 @@
-import { InvoiceRecord } from "../types";
-import { getInvoiceFilename } from "./getInvoicePath";
-import { resolveExistingInvoicePdfPath } from "./getInvoicePath";
-import { isTauriRuntime } from "../db/runtime";
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "../db/runtime";
+import { InvoiceRecord, WholesaleStore } from "../types";
+import { getInvoiceFilename, resolveExistingInvoicePdfPath } from "./getInvoicePath";
 
 const normalizeWhatsAppPhone = (phone: string | null) => {
   if (!phone) return "";
@@ -121,6 +120,181 @@ export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<vo
     }
   } catch {
     // Fall back to browser open if plugin isn't available.
+  }
+
+  if (typeof window !== "undefined") {
+    window.open(webFallbackUrl, "_blank");
+  }
+};
+
+/**
+ * Build a professional WhatsApp message for wholesale invoices.
+ * Includes line items, total, and pending amount info for credit invoices.
+ */
+const buildWholesaleMessage = (
+  invoice: InvoiceRecord,
+  store: WholesaleStore,
+  pendingAmount: number
+): string => {
+  const total = invoice.grand_total.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const invoiceDate = formatInvoiceDate(invoice.date);
+
+  const itemLines = (invoice.items || [])
+    .map(
+      (item, i) =>
+        `${i + 1}. ${item.name} × ${item.qty} = ₹${item.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    )
+    .join("\n");
+
+  const lines: string[] = [
+    `Hello ${store.contact_person || store.store_name},`,
+    "",
+    `Here is your wholesale invoice from *MotorMods*.`,
+    "",
+    `📄 Invoice No: ${invoice.invoice_number}`,
+    `📅 Date: ${invoiceDate}`,
+    `🏪 Store: ${store.store_name}`,
+    "",
+    `*Items:*`,
+    itemLines,
+    "",
+    `*Total Amount: ₹${total}*`,
+  ];
+
+  if (pendingAmount > 0) {
+    const pending = pendingAmount.toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    lines.push("");
+    lines.push(`⚠️ *Payment Pending: ₹${pending}*`);
+    lines.push(`Please clear the pending amount at your earliest convenience.`);
+  } else {
+    lines.push("");
+    lines.push(`✅ Payment received. Thank you!`);
+  }
+
+  lines.push("");
+  lines.push("Thank you for your business!");
+  lines.push("— MotorMods");
+
+  return lines.join("\n");
+};
+
+/**
+ * Share a wholesale invoice on WhatsApp with pending amount info.
+ * Uses the store's contact number.
+ */
+export const shareWholesaleInvoiceOnWhatsApp = async (
+  invoice: InvoiceRecord,
+  store: WholesaleStore,
+  pendingAmount: number
+): Promise<void> => {
+  const phone = normalizeWhatsAppPhone(store.contact_number);
+  const message = buildWholesaleMessage(invoice, store, pendingAmount);
+  const text = encodeURIComponent(message);
+
+  const desktopDeepLink = `whatsapp://send?phone=${phone}&text=${text}`;
+  const webFallbackUrl = `https://wa.me/${phone}?text=${text}`;
+
+  if (isTauriRuntime()) {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+
+      const deeplinks = [desktopDeepLink];
+      let opened = false;
+      for (const link of deeplinks) {
+        try {
+          await openUrl(link);
+          opened = true;
+          break;
+        } catch {
+          // Try the next variant.
+        }
+      }
+      if (!opened) {
+        await openUrl(webFallbackUrl);
+      }
+      return;
+    } catch {
+      // Fall through to browser fallback.
+    }
+  }
+
+  try {
+    const openerModule = await import("@tauri-apps/plugin-opener");
+    if (openerModule.openUrl) {
+      await openerModule.openUrl(webFallbackUrl);
+      return;
+    }
+  } catch {
+    // Fall back to browser open.
+  }
+
+  if (typeof window !== "undefined") {
+    window.open(webFallbackUrl, "_blank");
+  }
+};
+
+/**
+ * Build and share a payment receipt message on WhatsApp.
+ * Used when a credit payment is recorded for a wholesale invoice.
+ */
+export const sharePaymentReceiptOnWhatsApp = async (params: {
+  store: WholesaleStore;
+  invoiceNumber: string;
+  billAmount: number;
+  paidAmount: number;
+  pendingAmount: number;
+  paymentMode: string;
+}): Promise<void> => {
+  const { store, invoiceNumber, billAmount, paidAmount, pendingAmount, paymentMode } = params;
+  const phone = normalizeWhatsAppPhone(store.contact_number);
+
+  const fmt = (n: number) =>
+    n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const lines = [
+    `Hello ${store.contact_person || store.store_name},`,
+    "",
+    `💰 *Payment Receipt — MotorMods*`,
+    "",
+    `Invoice: ${invoiceNumber}`,
+    `Payment Mode: ${paymentMode.toUpperCase()}`,
+    `Date: ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
+    "",
+    `Bill Amount: ₹${fmt(billAmount)}`,
+    `Paid Now: ₹${fmt(paidAmount)}`,
+    `Pending: ₹${fmt(pendingAmount)}`,
+    "",
+    pendingAmount <= 0
+      ? `✅ All dues cleared. Thank you!`
+      : `⚠️ Remaining balance: ₹${fmt(pendingAmount)}`,
+    "",
+    "Thank you for your payment!",
+    "— MotorMods",
+  ];
+
+  const text = encodeURIComponent(lines.join("\n"));
+  const desktopDeepLink = `whatsapp://send?phone=${phone}&text=${text}`;
+  const webFallbackUrl = `https://wa.me/${phone}?text=${text}`;
+
+  if (isTauriRuntime()) {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      try {
+        await openUrl(desktopDeepLink);
+        return;
+      } catch {
+        await openUrl(webFallbackUrl);
+        return;
+      }
+    } catch {
+      // Fall through.
+    }
   }
 
   if (typeof window !== "undefined") {

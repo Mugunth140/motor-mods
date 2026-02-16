@@ -8,6 +8,7 @@ export interface Product {
   sku: string | null;
   category: string | null;
   price: number;
+  wholesale_price: number;
   quantity: number;
   barcode: string | null;
   purchase_price: number;
@@ -24,6 +25,8 @@ export type FSNClassification = 'F' | 'S' | 'N';
 // INVOICE TYPES
 // ============================================
 
+export type SaleType = 'retail' | 'wholesale';
+
 export interface Invoice {
   id: string;
   invoice_number?: string | null;
@@ -37,6 +40,8 @@ export interface Invoice {
   items?: string | null;
   status?: 'pending' | 'paid';
   payment_mode?: PaymentMode;
+  sale_type?: SaleType;
+  store_id?: string | null;
   is_return?: boolean;
   original_invoice_id?: string | null;
   return_reason?: string | null;
@@ -76,6 +81,10 @@ export interface InvoiceRecord {
   grand_total: number;
   items: InvoiceRecordItem[];
   status: 'pending' | 'paid';
+  sale_type?: SaleType;
+  store_id?: string | null;
+  store_name?: string | null;
+  paid_amount?: number;
 }
 
 // ============================================
@@ -241,6 +250,7 @@ export interface ProductFormData {
   sku: string;
   category: string;
   price: string;
+  wholesale_price: string;
   quantity: string;
   barcode: string;
   purchase_price: string;
@@ -253,9 +263,66 @@ export const emptyProductForm: ProductFormData = {
   sku: "",
   category: "",
   price: "",
+  wholesale_price: "",
   quantity: "",
   barcode: "",
   purchase_price: "",
   reorder_level: "5",
   max_stock: "",
 };
+
+// ============================================
+// WHOLESALE STORE TYPES
+// ============================================
+
+export interface WholesaleStore {
+  id: string;
+  store_name: string;
+  contact_person: string;
+  contact_number: string;
+  store_address: string;
+  credit_limit: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WholesaleStoreFormData {
+  store_name: string;
+  contact_person: string;
+  contact_number: string;
+  store_address: string;
+  credit_limit: string;
+}
+
+export const emptyStoreForm: WholesaleStoreFormData = {
+  store_name: "",
+  contact_person: "",
+  contact_number: "",
+  store_address: "",
+  credit_limit: "",
+};
+
+// ============================================
+// CREDIT PAYMENT TYPES
+// ============================================
+
+export interface CreditPayment {
+  id: string;
+  store_id: string;
+  invoice_id: string;
+  amount: number;
+  payment_mode: PaymentMode;
+  payment_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface CreditInvoiceSummary {
+  invoice: InvoiceRecord;
+  store: WholesaleStore;
+  total_paid: number;
+  outstanding: number;
+  payments: CreditPayment[];
+  status: 'unpaid' | 'partial' | 'paid';
+}

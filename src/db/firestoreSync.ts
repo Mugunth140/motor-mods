@@ -114,6 +114,7 @@ interface FirestoreProduct {
     sku: string | null;
     category: string | null;
     price: number;
+    wholesale_price: number;
     quantity: number;
     barcode: string | null;
     purchase_price: number;
@@ -135,6 +136,7 @@ const toFirestoreProduct = (product: Product): Omit<FirestoreProduct, 'synced_at
     sku: product.sku ?? null,
     category: product.category ?? null,
     price: product.price ?? 0,
+    wholesale_price: product.wholesale_price ?? 0,
     quantity: product.quantity ?? 0,
     barcode: product.barcode ?? null,
     purchase_price: product.purchase_price ?? 0,
@@ -535,4 +537,65 @@ export const flushSyncQueue = (): void => {
  */
 export const isSyncHealthy = (): boolean => {
     return isFirestoreSyncEnabled() && syncQueue.length === 0;
+};
+
+// ============================================
+// WHOLESALE STORE SYNC
+// ============================================
+
+import { WholesaleStore } from "../types";
+
+const WHOLESALE_STORES_COLLECTION = "wholesale_stores";
+
+/**
+ * Sync a wholesale store to Firestore
+ */
+export const syncWholesaleStoreToFirestore = async (store: WholesaleStore): Promise<boolean> => {
+    if (!isFirestoreSyncEnabled()) return false;
+
+    const db = getFirestoreDb();
+    if (!db) return false;
+
+    try {
+        await withRetry(async () => {
+            const docRef = doc(db, WHOLESALE_STORES_COLLECTION, store.id);
+            await setDoc(docRef, {
+                id: store.id,
+                store_name: store.store_name,
+                contact_person: store.contact_person,
+                contact_number: store.contact_number ?? null,
+                store_address: store.store_address ?? null,
+                credit_limit: store.credit_limit ?? 0,
+                is_active: store.is_active,
+                created_at: store.created_at,
+                updated_at: store.updated_at,
+                synced_at: serverTimestamp(),
+            });
+        });
+        return true;
+    } catch (error) {
+        console.error(`Failed to sync wholesale store ${store.id}:`, error);
+        return false;
+    }
+};
+
+/**
+ * Delete a wholesale store from Firestore
+ */
+export const deleteWholesaleStoreFromFirestore = async (storeId: string): Promise<boolean> => {
+    if (!isFirestoreSyncEnabled()) return false;
+
+    const db = getFirestoreDb();
+    if (!db) return false;
+
+    try {
+        await withRetry(async () => {
+            const docRef = doc(db, WHOLESALE_STORES_COLLECTION, storeId);
+            await deleteDoc(docRef);
+        });
+        return true;
+    } catch (error) {
+        console.error(`Failed to delete wholesale store ${storeId} from Firestore:`, error);
+        return false;
+    }
 };

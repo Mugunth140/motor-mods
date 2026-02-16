@@ -11,6 +11,7 @@ import { SalesReturns } from "./components/SalesReturns";
 import { Settings } from "./components/Settings";
 import { StockManagement } from "./components/StockManagement";
 import { ToastProvider } from "./components/ui";
+import { WholesaleHub } from "./components/WholesaleHub";
 import { backupService } from "./db/backupService";
 import { initializeFirebase } from "./db/firebase";
 import { useAuthSession } from "./hooks";
@@ -48,6 +49,8 @@ function AppContent() {
         return <Dashboard onNavigate={setActiveTab} />;
       case "billing":
         return <Billing />;
+      case "wholesale":
+        return <WholesaleHub />;
       case "stock":
         return <StockManagement canEdit={true} canDelete={session?.role === "admin"} />;
       case "returns":

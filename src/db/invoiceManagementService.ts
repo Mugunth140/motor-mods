@@ -1,5 +1,5 @@
 import { BaseDirectory, mkdir, writeFile } from "@tauri-apps/plugin-fs";
-import { InvoiceRecord, InvoiceRecordItem, PaymentMode } from "../types";
+import { InvoiceRecord, InvoiceRecordItem, PaymentMode, SaleType } from "../types";
 import { generateInvoicePdfBytes } from "../utils/generatePDF";
 import { getInvoiceFilename } from "../utils/getInvoicePath";
 import { getDb } from "./index";
@@ -67,6 +67,9 @@ export const invoiceManagementService = {
     items: InvoiceRecordItem[];
     status?: "pending" | "paid";
     paymentMode?: PaymentMode;
+    saleType?: SaleType;
+    storeId?: string | null;
+    storeName?: string | null;
     createdAt?: string;
   }): Promise<InvoiceRecord> {
     const createdAt = params.createdAt || new Date().toISOString();
@@ -85,6 +88,9 @@ export const invoiceManagementService = {
         grand_total: params.grandTotal,
         items: params.items,
         status: params.status ?? "paid",
+        sale_type: params.saleType ?? "retail",
+        store_id: params.storeId ?? null,
+        store_name: params.storeName ?? null,
       };
       records.unshift(record);
       saveLocalInvoices(records);
@@ -117,11 +123,13 @@ export const invoiceManagementService = {
         items,
         status,
         payment_mode,
+        sale_type,
+        store_id,
         is_return,
         original_invoice_id,
         return_reason,
         created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, NULL, NULL, $13)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, NULL, NULL, $15)`,
       [
         params.invoiceId,
         invoiceNumber,
@@ -135,6 +143,8 @@ export const invoiceManagementService = {
         itemsJson,
         params.status ?? "paid",
         params.paymentMode ?? "cash",
+        params.saleType ?? "retail",
+        params.storeId ?? null,
         createdAt,
       ]
     );
@@ -149,6 +159,9 @@ export const invoiceManagementService = {
       grand_total: params.grandTotal,
       items: params.items,
       status: params.status ?? "paid",
+      sale_type: params.saleType ?? "retail",
+      store_id: params.storeId ?? null,
+      store_name: params.storeName ?? null,
     };
 
     await persistInvoicePdf(record);
@@ -214,8 +227,10 @@ export const invoiceManagementService = {
       grand_total: number;
       items: string | null;
       status: "pending" | "paid" | null;
+      sale_type: string | null;
+      store_id: string | null;
     }[]>(
-      `SELECT id, invoice_number, date, customer_name, customer_phone, subtotal, grand_total, items, status
+      `SELECT id, invoice_number, date, customer_name, customer_phone, subtotal, grand_total, items, status, sale_type, store_id
        FROM invoices
        WHERE invoice_number IS NOT NULL
        ORDER BY date DESC`
@@ -231,6 +246,8 @@ export const invoiceManagementService = {
       grand_total: row.grand_total ?? 0,
       items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
       status: row.status === "pending" ? "pending" : "paid",
+      sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
+      store_id: row.store_id ?? null,
     }));
   },
 
@@ -251,8 +268,10 @@ export const invoiceManagementService = {
       grand_total: number;
       items: string | null;
       status: "pending" | "paid" | null;
+      sale_type: string | null;
+      store_id: string | null;
     }[]>(
-      `SELECT id, invoice_number, date, customer_name, customer_phone, subtotal, grand_total, items, status
+      `SELECT id, invoice_number, date, customer_name, customer_phone, subtotal, grand_total, items, status, sale_type, store_id
        FROM invoices
        WHERE id = $1
        LIMIT 1`,
@@ -272,6 +291,8 @@ export const invoiceManagementService = {
       grand_total: row.grand_total ?? 0,
       items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
       status: row.status === "pending" ? "pending" : "paid",
+      sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
+      store_id: row.store_id ?? null,
     };
   },
 };

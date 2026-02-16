@@ -7,17 +7,19 @@ import {
     Plus,
     Search,
     ShoppingCart,
+    Store,
     Trash2,
     User,
     X
 } from "lucide-react";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VirtuosoGrid } from 'react-virtuoso';
 import { v4 as uuidv4 } from "uuid";
 import { invoiceManagementService } from "../db/invoiceManagementService";
 import { invoiceService } from "../db/invoiceService";
+import { wholesaleStoreService } from "../db/wholesaleStoreService";
 import { useDebounce, useKeyboardShortcut, useProducts } from "../hooks";
-import { CartItem, InvoiceItem, Product } from "../types";
+import { CartItem, InvoiceItem, PaymentMode, Product, SaleType, WholesaleStore } from "../types";
 import { Badge, Button, ConfirmModal, useToast } from "./ui";
 
 export const Billing: React.FC = () => {
@@ -25,11 +27,19 @@ export const Billing: React.FC = () => {
   const toast = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Sale type toggle
+  const [saleType, setSaleType] = useState<SaleType>("retail");
+
+  // Wholesale store selection
+  const [stores, setStores] = useState<WholesaleStore[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<string>("");
+
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [discount, setDiscount] = useState("");
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   // Search state
@@ -43,12 +53,57 @@ export const Billing: React.FC = () => {
   // Clear cart confirmation
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  // Load wholesale stores
+  useEffect(() => {
+    const loadStores = async () => {
+      try {
+        const allStores = await wholesaleStoreService.getAll();
+        setStores(allStores);
+      } catch (error) {
+        console.error("Failed to load stores:", error);
+      }
+    };
+    loadStores();
+  }, []);
+
   // Keyboard shortcuts
   useKeyboardShortcut("f", () => searchInputRef.current?.focus(), { ctrl: true });
   useKeyboardShortcut("Escape", () => {
     setSearch("");
     searchInputRef.current?.blur();
   });
+
+  // Reset cart when switching sale type
+  const handleSaleTypeChange = (newType: SaleType) => {
+    if (cart.length > 0) {
+      const confirmSwitch = window.confirm(
+        "Switching sale type will clear the current cart. Continue?"
+      );
+      if (!confirmSwitch) return;
+    }
+    setSaleType(newType);
+    setCart([]);
+    setDiscount("");
+    setSelectedStoreId("");
+    setCustomerName("");
+    setCustomerPhone("");
+    setPaymentMode("cash");
+  };
+
+  const selectedStore = useMemo(
+    () => stores.find((s) => s.id === selectedStoreId) ?? null,
+    [stores, selectedStoreId]
+  );
+
+  const getProductPrice = useCallback(
+    (product: Product) => {
+      if (saleType === "wholesale" && product.wholesale_price > 0) {
+        return product.wholesale_price;
+      }
+      return product.price;
+    },
+    [saleType]
+  );
 
   const filteredProducts = useMemo(() => {
     if (!debouncedSearch) return products;
@@ -60,15 +115,19 @@ export const Billing: React.FC = () => {
   }, [products, debouncedSearch]);
 
   const subtotalAmount = useMemo(() =>
-    cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0),
-    [cart]
+    cart.reduce((sum, item) => {
+      const price = getProductPrice(item);
+      return sum + price * item.cartQuantity;
+    }, 0),
+    [cart, getProductPrice]
   );
 
   const discountAmount = useMemo(() => {
+    if (saleType === "wholesale") return 0; // No discount for wholesale
     const parsed = Number.parseFloat(discount);
     const raw = Number.isFinite(parsed) ? parsed : 0;
     return Math.max(0, Math.min(raw, subtotalAmount));
-  }, [discount, subtotalAmount]);
+  }, [discount, subtotalAmount, saleType]);
 
   const totalAmount = useMemo(
     () => Math.max(0, subtotalAmount - discountAmount),
@@ -156,6 +215,8 @@ export const Billing: React.FC = () => {
     setCustomerName("");
     setCustomerPhone("");
     setDiscount("");
+    setPaymentMode("cash");
+    setSelectedStoreId("");
     setShowClearConfirm(false);
     toast.info("Cart Cleared", "All items have been removed");
   };
@@ -164,6 +225,23 @@ export const Billing: React.FC = () => {
     if (cart.length === 0) {
       toast.warning("Empty Cart", "Add items to cart before checkout");
       return;
+    }
+
+    // Wholesale validation
+    if (saleType === "wholesale") {
+      if (!selectedStore) {
+        toast.warning("Select Store", "Please select a wholesale store before checkout");
+        return;
+      }
+
+      // Credit limit check (per-sale)
+      if (paymentMode === "credit" && selectedStore.credit_limit > 0 && totalAmount > selectedStore.credit_limit) {
+        toast.error(
+          "Credit Limit Exceeded",
+          `This bill (₹${totalAmount.toLocaleString()}) exceeds the per-sale credit limit of ₹${selectedStore.credit_limit.toLocaleString()} for ${selectedStore.store_name}`
+        );
+        return;
+      }
     }
 
     setIsCheckingOut(true);
@@ -192,18 +270,35 @@ export const Billing: React.FC = () => {
       id: uuidv4(),
       product_id: item.id,
       quantity: item.cartQuantity,
-      price: item.price,
+      price: getProductPrice(item),
       cost_price: item.purchase_price ?? 0,
     }));
+
+    const invoiceStatus: "pending" | "paid" =
+      saleType === "wholesale" && paymentMode === "credit" ? "pending" : "paid";
+
+    const customerNameValue =
+      saleType === "wholesale" && selectedStore
+        ? selectedStore.store_name
+        : customerName.trim() || "Walking Customer";
+
+    const customerPhoneValue =
+      saleType === "wholesale" && selectedStore
+        ? selectedStore.contact_number
+        : customerPhone.trim() || null;
 
     try {
       await invoiceService.createInvoice(
         {
           id: invoiceId,
-          customer_name: customerName.trim() || "Walking Customer",
-          customer_phone: customerPhone.trim() || null,
+          customer_name: customerNameValue,
+          customer_phone: customerPhoneValue,
           discount_amount: discountAmount,
           total_amount: totalAmount,
+          sale_type: saleType,
+          store_id: saleType === "wholesale" ? selectedStoreId : null,
+          status: invoiceStatus,
+          payment_mode: paymentMode,
           created_at: new Date().toISOString(),
         },
         invoiceItems
@@ -213,31 +308,45 @@ export const Billing: React.FC = () => {
       try {
         const record = await invoiceManagementService.saveInvoiceRecord({
           invoiceId,
-          customerName: customerName.trim() || "Walking Customer",
-          customerPhone: customerPhone.trim() || null,
+          customerName: customerNameValue,
+          customerPhone: customerPhoneValue,
           subtotal: subtotalAmount,
           grandTotal: totalAmount,
           discountAmount: discountAmount,
           items: cart.map((item) => ({
             name: item.name,
             qty: item.cartQuantity,
-            rate: item.price,
-            total: item.cartQuantity * item.price,
+            rate: getProductPrice(item),
+            total: item.cartQuantity * getProductPrice(item),
           })),
-          status: "paid",
-          paymentMode: "cash",
+          status: invoiceStatus,
+          paymentMode: paymentMode,
+          saleType: saleType,
+          storeId: saleType === "wholesale" ? selectedStoreId : null,
+          storeName: saleType === "wholesale" && selectedStore ? selectedStore.store_name : null,
           createdAt: new Date().toISOString(),
         });
         invoiceNumberLabel = record.invoice_number;
+
+        // For wholesale, send invoice via WhatsApp instead of printing
+        if (saleType === "wholesale" && selectedStore) {
+          const pendingAmount = invoiceStatus === "pending" ? totalAmount : 0;
+          try {
+            await shareWholesaleInvoiceOnWhatsApp(record, selectedStore, pendingAmount);
+          } catch (whatsappError) {
+            console.error("WhatsApp share failed:", whatsappError);
+            toast.warning("WhatsApp Failed", "Invoice saved but WhatsApp could not be opened");
+          }
+        }
       } catch (error) {
         console.error(error);
-        toast.warning("Invoice PDF Failed", "Bill saved, but invoice PDF could not be generated");
+        toast.warning("Invoice Record Failed", "Bill saved, but invoice record could not be generated");
       }
 
       // Show success message
       toast.success(
         "Invoice Created",
-        `Invoice #${invoiceNumberLabel} for ₹${totalAmount.toLocaleString()}`
+        `${saleType === "wholesale" ? "Wholesale " : ""}Invoice #${invoiceNumberLabel} for ₹${totalAmount.toLocaleString()}${invoiceStatus === "pending" ? " (Credit)" : ""}`
       );
 
       // Clear cart and UI immediately
@@ -245,6 +354,7 @@ export const Billing: React.FC = () => {
       setCustomerName("");
       setCustomerPhone("");
       setDiscount("");
+      setPaymentMode("cash");
       setIsCheckingOut(false);
 
       // Refresh product quantities
@@ -328,6 +438,7 @@ export const Billing: React.FC = () => {
 
                 const inCartItem = cart.find((item) => item.id === p.id);
                 const available = p.quantity - (inCartItem?.cartQuantity || 0);
+                const displayPrice = getProductPrice(p);
 
                 let statusText = `${available} in stock`;
                 let statusVariant: "success" | "warning" | "danger" = "success";
@@ -381,7 +492,12 @@ export const Billing: React.FC = () => {
                       </div>
 
                       <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                        <span className="text-base font-bold text-slate-900">₹{p.price.toLocaleString()}</span>
+                        <div className="flex flex-col">
+                          <span className="text-base font-bold text-slate-900">₹{displayPrice.toLocaleString()}</span>
+                          {saleType === "wholesale" && p.wholesale_price > 0 && p.wholesale_price !== p.price && (
+                            <span className="text-[10px] text-slate-400 line-through">₹{p.price.toLocaleString()}</span>
+                          )}
+                        </div>
                         <div
                           className={`w-7 h-7 rounded-full flex items-center justify-center transition-all
                             ${isDisabled
@@ -403,11 +519,39 @@ export const Billing: React.FC = () => {
 
       {/* Cart Sidebar */}
       <div className="w-96 flex flex-col h-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        {/* Sale Type Toggle */}
+        <div className="p-3 border-b border-slate-100 bg-slate-50/80">
+          <div className="flex bg-slate-200 rounded-xl p-1">
+            <button
+              onClick={() => handleSaleTypeChange("retail")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                saleType === "retail"
+                  ? "bg-white text-indigo-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <User size={16} />
+              Retail
+            </button>
+            <button
+              onClick={() => handleSaleTypeChange("wholesale")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                saleType === "wholesale"
+                  ? "bg-white text-indigo-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <Store size={16} />
+              Wholesale
+            </button>
+          </div>
+        </div>
+
         <div className="p-5 border-b border-slate-100 bg-slate-50/80 backdrop-blur-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
               <ShoppingCart className="text-indigo-600" size={20} />
-              Current Order
+              {saleType === "wholesale" ? "Wholesale Order" : "Current Order"}
             </h2>
             {cart.length > 0 && (
               <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded-full border border-indigo-200">
@@ -417,35 +561,80 @@ export const Billing: React.FC = () => {
           </div>
         </div>
 
-        {/* Customer Name */}
+        {/* Customer / Store Section */}
         <div className="p-4 border-b border-slate-100 bg-white space-y-3">
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Customer</label>
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
-              <User size={16} className="text-slate-400" />
-              <input
-                type="text"
-                placeholder="Walking Customer"
-                className="flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 font-medium"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-              />
-            </div>
-          </div>
+          {saleType === "wholesale" ? (
+            /* Store Selector */
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Select Store *</label>
+              <div className="relative">
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                  <Store size={16} className="text-slate-400" />
+                  {selectedStore ? (
+                    <div className="flex-1 flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-semibold text-slate-700">{selectedStore.store_name}</span>
+                        <span className="text-xs text-slate-400 ml-2">({selectedStore.contact_person})</span>
+                      </div>
+                      <button
+                        onClick={() => setSelectedStoreId("")}
+                        className="p-1 hover:bg-slate-200 rounded-lg"
+                      >
+                        <X size={14} className="text-slate-400" />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedStoreId}
+                      onChange={(e) => setSelectedStoreId(e.target.value)}
+                      className="flex-1 bg-transparent text-sm text-slate-700 outline-none font-medium"
+                    >
+                      <option value="">Choose a store...</option>
+                      {stores.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.store_name} — {s.contact_person}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+              {selectedStore && (
+                <div className="text-xs text-slate-500 px-1 space-y-0.5">
+                  <p>📞 {selectedStore.contact_number || "No phone"}</p>
+                  {selectedStore.credit_limit > 0 && (
+                    <p>💳 Per-sale credit limit: ₹{selectedStore.credit_limit.toLocaleString()}</p>
+                  )}
+                </div>
+              )}
 
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Phone</label>
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
-              <span className="text-xs text-slate-400 font-bold">+91</span>
-              <input
-                type="tel"
-                placeholder="Optional"
-                className="flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 font-medium"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-              />
+              {/* Payment Mode for Wholesale */}
+              <div className="space-y-1 pt-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Payment Mode</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["cash", "upi", "card", "credit"] as PaymentMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setPaymentMode(mode)}
+                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
+                        paymentMode === mode
+                          ? mode === "credit"
+                            ? "bg-amber-50 border-amber-300 text-amber-700"
+                            : "bg-indigo-50 border-indigo-300 text-indigo-700"
+                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                      }`}
+                    >
+                      {mode === "credit" ? "🔖 Credit" : mode === "cash" ? "💵 Cash" : mode === "upi" ? "📱 UPI" : "💳 Card"}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Retail Customer Section */
+            <>
+            </>
+          )}
         </div>
 
         {/* Cart Items */}
@@ -457,14 +646,19 @@ export const Billing: React.FC = () => {
               <p className="text-xs text-slate-400">Select products to add</p>
             </div>
           ) : (
-            cart.map((item) => (
+            cart.map((item) => {
+              const price = getProductPrice(item);
+              return (
               <div
                 key={item.id}
                 className="flex gap-3 p-3 rounded-xl bg-white border border-slate-200 shadow-sm group hover:border-indigo-300 transition-all"
               >
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800 text-sm truncate">{item.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">₹{item.price.toLocaleString()} / unit</p>
+                  <p className="text-xs text-slate-500 mt-0.5">₹{price.toLocaleString()} / unit</p>
+                  {saleType === "wholesale" && item.wholesale_price > 0 && item.wholesale_price !== item.price && (
+                    <p className="text-[10px] text-slate-400 line-through">Retail: ₹{item.price.toLocaleString()}</p>
+                  )}
                 </div>
 
                 <div className="flex flex-col items-end gap-2">
@@ -495,11 +689,12 @@ export const Billing: React.FC = () => {
                     </button>
                   </div>
                   <span className="text-sm font-bold text-slate-900">
-                    ₹{(item.price * item.cartQuantity).toLocaleString()}
+                    ₹{(price * item.cartQuantity).toLocaleString()}
                   </span>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -512,22 +707,31 @@ export const Billing: React.FC = () => {
                 <span className="font-medium text-slate-700">₹{subtotalAmount.toLocaleString()}</span>
               </div>
 
-              <div className="flex items-center justify-between gap-3 text-sm text-slate-500">
-                <span>Discount</span>
-                <div className="flex items-center gap-1 border-b border-slate-300 focus-within:border-indigo-500 transition-colors">
-                  <span className="text-slate-400">₹</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={subtotalAmount}
-                    step={1}
-                    placeholder="0"
-                    value={discount}
-                    onChange={(e) => setDiscount(e.target.value)}
-                    className="w-16 text-right bg-transparent outline-none font-medium text-slate-700"
-                  />
+              {saleType === "retail" && (
+                <div className="flex items-center justify-between gap-3 text-sm text-slate-500">
+                  <span>Discount</span>
+                  <div className="flex items-center gap-1 border-b border-slate-300 focus-within:border-indigo-500 transition-colors">
+                    <span className="text-slate-400">₹</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={subtotalAmount}
+                      step={1}
+                      placeholder="0"
+                      value={discount}
+                      onChange={(e) => setDiscount(e.target.value)}
+                      className="w-16 text-right bg-transparent outline-none font-medium text-slate-700"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {saleType === "wholesale" && paymentMode === "credit" && (
+                <div className="flex items-center gap-2 text-xs bg-amber-50 text-amber-700 px-3 py-2 rounded-lg border border-amber-200">
+                  <CreditCard size={14} />
+                  <span>This will be recorded as credit (pending payment)</span>
+                </div>
+              )}
 
               <div className="pt-3 border-t border-dashed border-slate-200 flex justify-between items-end">
                 <span className="text-sm font-bold text-slate-800">Total</span>
@@ -549,12 +753,14 @@ export const Billing: React.FC = () => {
             <button
               className={`
                 flex-1 h-12 rounded-xl font-bold text-white shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transition-all
-                ${cart.length === 0 || isCheckingOut
+                ${cart.length === 0 || isCheckingOut || (saleType === "wholesale" && !selectedStoreId)
                   ? 'bg-slate-300 cursor-not-allowed shadow-none'
-                  : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-xl hover:-translate-y-0.5'
+                  : paymentMode === "credit"
+                    ? 'bg-amber-600 hover:bg-amber-700 hover:shadow-xl hover:-translate-y-0.5 shadow-amber-200'
+                    : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-xl hover:-translate-y-0.5'
                 }
               `}
-              disabled={cart.length === 0 || isCheckingOut}
+              disabled={cart.length === 0 || isCheckingOut || (saleType === "wholesale" && !selectedStoreId)}
               onClick={handleCheckout}
             >
               {isCheckingOut ? (
@@ -565,7 +771,11 @@ export const Billing: React.FC = () => {
               ) : (
                 <>
                   <CreditCard size={20} />
-                  <span>Checkout</span>
+                  <span>
+                    {saleType === "wholesale" && paymentMode === "credit"
+                      ? "Bill on Credit"
+                      : "Checkout"}
+                  </span>
                 </>
               )}
             </button>
@@ -588,6 +798,7 @@ export const Billing: React.FC = () => {
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 leading-tight">{quickAddProduct.name}</h3>
                 <p className="text-sm text-slate-500 mt-1">Available: {quickAddProduct.quantity} units</p>
+                <p className="text-sm font-semibold text-indigo-600 mt-1">₹{getProductPrice(quickAddProduct).toLocaleString()} / unit</p>
               </div>
 
               <div className="flex items-center justify-center gap-4 mb-8">

@@ -1,8 +1,8 @@
 import { Product } from "../types";
 import {
-  deleteProductFromFirestore,
-  syncProductToFirestore,
-  syncStockQuantityToFirestore,
+    deleteProductFromFirestore,
+    syncProductToFirestore,
+    syncStockQuantityToFirestore,
 } from "./firestoreSync";
 import { getDb } from "./index";
 import { isTauriRuntime } from "./runtime";
@@ -42,7 +42,7 @@ export const productService = {
     const db = await getDb();
     await ensureProductsCategoryColumn(db);
     return await db.select<Product[]>(
-      "SELECT id, name, sku, category, price, purchase_price, quantity, reorder_level, barcode, updated_at FROM products ORDER BY name ASC"
+      "SELECT id, name, sku, category, price, wholesale_price, purchase_price, quantity, reorder_level, barcode, updated_at FROM products ORDER BY name ASC"
     );
   },
 
@@ -54,7 +54,7 @@ export const productService = {
     const db = await getDb();
     await ensureProductsCategoryColumn(db);
     const result = await db.select<Product[]>(
-      "SELECT id, name, sku, category, price, purchase_price, quantity, reorder_level, barcode, updated_at FROM products WHERE id = $1",
+      "SELECT id, name, sku, category, price, wholesale_price, purchase_price, quantity, reorder_level, barcode, updated_at FROM products WHERE id = $1",
       [id]
     );
     return result.length > 0 ? result[0] : null;
@@ -67,6 +67,7 @@ export const productService = {
       category: product.category ?? null,
       barcode: product.barcode ?? null,
       purchase_price: product.purchase_price ?? 0,
+      wholesale_price: product.wholesale_price ?? 0,
       reorder_level: product.reorder_level ?? 5,
       max_stock: product.max_stock ?? null,
       last_sale_date: product.last_sale_date ?? null,
@@ -92,11 +93,11 @@ export const productService = {
     await ensureProductsCategoryColumn(db);
 
     await db.execute(
-      `INSERT INTO products (id, name, sku, category, price, quantity, barcode, purchase_price, reorder_level, max_stock)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO products (id, name, sku, category, price, wholesale_price, quantity, barcode, purchase_price, reorder_level, max_stock)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         fullProduct.id, fullProduct.name, fullProduct.sku, fullProduct.category,
-        fullProduct.price, fullProduct.quantity, fullProduct.barcode,
+        fullProduct.price, fullProduct.wholesale_price, fullProduct.quantity, fullProduct.barcode,
         fullProduct.purchase_price, fullProduct.reorder_level, fullProduct.max_stock
       ]
     );
@@ -123,8 +124,8 @@ export const productService = {
     await ensureProductsCategoryColumn(db);
 
     await db.execute(
-      "UPDATE products SET name = $1, sku = $2, category = $3, price = $4, quantity = $5, purchase_price = $6, reorder_level = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8",
-      [product.name, product.sku, product.category, product.price, product.quantity, product.purchase_price ?? 0, product.reorder_level ?? 5, product.id]
+      "UPDATE products SET name = $1, sku = $2, category = $3, price = $4, wholesale_price = $5, quantity = $6, purchase_price = $7, reorder_level = $8, updated_at = CURRENT_TIMESTAMP WHERE id = $9",
+      [product.name, product.sku, product.category, product.price, product.wholesale_price ?? 0, product.quantity, product.purchase_price ?? 0, product.reorder_level ?? 5, product.id]
     );
 
     // Sync to Firestore (fire and forget)

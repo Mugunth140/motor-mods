@@ -50,6 +50,7 @@ const ensureSchema = async (database: Database) => {
       sku TEXT,
       category TEXT,
       price REAL NOT NULL,
+      wholesale_price REAL DEFAULT 0,
       quantity INTEGER NOT NULL DEFAULT 0,
       barcode TEXT,
       purchase_price REAL DEFAULT 0,
@@ -77,11 +78,14 @@ const ensureSchema = async (database: Database) => {
       items TEXT,
       status TEXT DEFAULT 'paid',
       payment_mode TEXT DEFAULT 'cash',
+      sale_type TEXT DEFAULT 'retail',
+      store_id TEXT,
       is_return INTEGER DEFAULT 0,
       original_invoice_id TEXT,
       return_reason TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(original_invoice_id) REFERENCES invoices(id)
+      FOREIGN KEY(original_invoice_id) REFERENCES invoices(id),
+      FOREIGN KEY(store_id) REFERENCES wholesale_stores(id)
     )
   `);
 
@@ -204,6 +208,48 @@ const ensureSchema = async (database: Database) => {
   await database.execute("CREATE INDEX IF NOT EXISTS idx_backup_log_date ON backup_log(backup_date)");
 
   // ============================================
+  // WHOLESALE STORES TABLE
+  // ============================================
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS wholesale_stores (
+      id TEXT PRIMARY KEY,
+      store_name TEXT NOT NULL,
+      contact_person TEXT NOT NULL,
+      contact_number TEXT,
+      store_address TEXT,
+      credit_limit REAL DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_wholesale_stores_name ON wholesale_stores(store_name)");
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_wholesale_stores_active ON wholesale_stores(is_active)");
+
+  // ============================================
+  // CREDIT PAYMENTS TABLE
+  // ============================================
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS credit_payments (
+      id TEXT PRIMARY KEY,
+      store_id TEXT NOT NULL,
+      invoice_id TEXT NOT NULL,
+      amount REAL NOT NULL,
+      payment_mode TEXT DEFAULT 'cash',
+      payment_date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(store_id) REFERENCES wholesale_stores(id),
+      FOREIGN KEY(invoice_id) REFERENCES invoices(id)
+    )
+  `);
+
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_credit_payments_store ON credit_payments(store_id)");
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_credit_payments_invoice ON credit_payments(invoice_id)");
+  await database.execute("CREATE INDEX IF NOT EXISTS idx_credit_payments_date ON credit_payments(payment_date)");
+
+  // ============================================
   // USERS TABLE
   // ============================================
   await database.execute(`
@@ -264,6 +310,9 @@ const ensureSchema = async (database: Database) => {
   if (!productColNames.has("fsn_classification")) {
     await database.execute("ALTER TABLE products ADD COLUMN fsn_classification TEXT");
   }
+  if (!productColNames.has("wholesale_price")) {
+    await database.execute("ALTER TABLE products ADD COLUMN wholesale_price REAL DEFAULT 0");
+  }
 
   // Invoices table migrations
   const invoiceCols = await database.select<{ name: string }[]>("PRAGMA table_info(invoices)");
@@ -304,6 +353,12 @@ const ensureSchema = async (database: Database) => {
   }
   if (!invoiceColNames.has("return_reason")) {
     await database.execute("ALTER TABLE invoices ADD COLUMN return_reason TEXT");
+  }
+  if (!invoiceColNames.has("sale_type")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN sale_type TEXT DEFAULT 'retail'");
+  }
+  if (!invoiceColNames.has("store_id")) {
+    await database.execute("ALTER TABLE invoices ADD COLUMN store_id TEXT");
   }
 
   // Invoice Items table migrations
