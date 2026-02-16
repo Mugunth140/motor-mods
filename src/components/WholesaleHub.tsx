@@ -488,38 +488,38 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
     <div className="space-y-4">
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="border-l-4 border-l-red-500">
-          <div className="p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
-              <IndianRupee size={24} />
+        <Card className="border-l-4 border-l-red-500 h-22">
+          <div className="h-full p-3 flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-red-100 text-red-600 flex items-center justify-center">
+              <IndianRupee size={22} />
             </div>
             <div>
               <p className="text-sm text-slate-500">Total Outstanding</p>
-              <p className="text-2xl font-bold text-slate-800">₹{totalOutstanding.toLocaleString()}</p>
+              <p className="text-xl font-bold text-slate-800">₹{totalOutstanding.toLocaleString()}</p>
             </div>
           </div>
         </Card>
 
-        <Card className="border-l-4 border-l-amber-500">
-          <div className="p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center">
-              <BookOpen size={24} />
+        <Card className="border-l-4 border-l-amber-500 h-22">
+          <div className="h-full p-3 flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+              <BookOpen size={22} />
             </div>
             <div>
               <p className="text-sm text-slate-500">Pending Invoices</p>
-              <p className="text-2xl font-bold text-slate-800">{pendingCount}</p>
+              <p className="text-xl font-bold text-slate-800">{pendingCount}</p>
             </div>
           </div>
         </Card>
 
-        <Card className="border-l-4 border-l-indigo-500">
-          <div className="p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
-              <Store size={24} />
+        <Card className="border-l-4 border-l-indigo-500 h-22">
+          <div className="h-full p-3 flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center">
+              <Store size={22} />
             </div>
             <div>
               <p className="text-sm text-slate-500">Total Invoices</p>
-              <p className="text-2xl font-bold text-slate-800">{ledger.length}</p>
+              <p className="text-xl font-bold text-slate-800">{ledger.length}</p>
             </div>
           </div>
         </Card>
@@ -617,7 +617,6 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
                             }}
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors flex items-center gap-1"
                           >
-                            <DollarSign size={12} />
                             Record Payment
                           </button>
                         )}
@@ -708,7 +707,7 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
                         : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
                     }`}
                   >
-                    {mode === "cash" ? "💵 Cash" : mode === "upi" ? "📱 UPI" : "💳 Card"}
+                    {mode === "cash" ? "Cash" : mode === "upi" ? "UPI" : "Card"}
                   </button>
                 ))}
               </div>

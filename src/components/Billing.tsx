@@ -625,7 +625,7 @@ export const Billing: React.FC = () => {
                           : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
                       }`}
                     >
-                      {mode === "credit" ? "🔖 Credit" : mode === "cash" ? "💵 Cash" : mode === "upi" ? "📱 UPI" : "💳 Card"}
+                      {mode === "credit" ? "Credit" : mode === "cash" ? "Cash" : mode === "upi" ? "UPI" : "Card"}
                     </button>
                   ))}
                 </div>
