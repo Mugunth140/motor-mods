@@ -167,7 +167,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       {/* Footer */}
       <div className="absolute bottom-6 text-center text-slate-600 text-xs">
-        <p>&copy; {new Date().getFullYear()} MotorMods System v0.2.0</p>
+        <p>&copy; {new Date().getFullYear()} MotorMods System v2.1.0</p>
       </div>
     </div>
   );

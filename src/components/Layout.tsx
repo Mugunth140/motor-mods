@@ -196,7 +196,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                             'Offline'}
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono">v0.2.0</span>
+                  <span className="text-[10px] text-slate-500 font-mono">v2.1.0</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-500">
                   {isSyncEnabled ? <Cloud size={12} /> : isOnline ? <HardDrive size={12} /> : <CloudOff size={12} />}

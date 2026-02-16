@@ -198,7 +198,7 @@ export const Settings: React.FC = () => {
                                         <h4 className="text-xl font-bold text-slate-800">MotorMods</h4>
                                         <p className="text-slate-500 font-medium">Billing & Inventory System</p>
                                         <div className="flex items-center gap-2 mt-2">
-                                            <Badge variant="info" size="sm">v0.2.0</Badge>
+                                            <Badge variant="info" size="sm">v2.1.0</Badge>
                                             <span className="text-xs text-slate-400">Latest build</span>
                                         </div>
                                     </div>
