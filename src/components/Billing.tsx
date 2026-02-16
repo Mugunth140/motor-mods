@@ -1,16 +1,16 @@
 import {
-    Check,
-    CreditCard,
-    Keyboard,
-    Minus,
-    Package,
-    Plus,
-    Search,
-    ShoppingCart,
-    Store,
-    Trash2,
-    User,
-    X
+  Check,
+  CreditCard,
+  Keyboard,
+  Minus,
+  Package,
+  Plus,
+  Search,
+  ShoppingCart,
+  Store,
+  Trash2,
+  User,
+  X
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VirtuosoGrid } from 'react-virtuoso';
@@ -20,6 +20,7 @@ import { invoiceService } from "../db/invoiceService";
 import { wholesaleStoreService } from "../db/wholesaleStoreService";
 import { useDebounce, useKeyboardShortcut, useProducts } from "../hooks";
 import { CartItem, InvoiceItem, PaymentMode, Product, SaleType, WholesaleStore } from "../types";
+import { shareWholesaleInvoiceOnWhatsApp } from "../utils/shareWhatsApp";
 import { Badge, Button, ConfirmModal, useToast } from "./ui";
 
 export const Billing: React.FC = () => {
