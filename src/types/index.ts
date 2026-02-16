@@ -41,6 +41,7 @@ export interface Invoice {
   payment_mode?: PaymentMode;
   sale_type?: SaleType;
   store_id?: string | null;
+  store_name?: string | null;
   is_return?: boolean;
   original_invoice_id?: string | null;
   return_reason?: string | null;

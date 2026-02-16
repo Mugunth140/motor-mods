@@ -1,7 +1,5 @@
 import {
   Calendar,
-  CreditCard,
-  DollarSign,
   Eye,
   MessageCircle,
   Receipt,

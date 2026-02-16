@@ -3,14 +3,18 @@ import {
     ChevronLeft,
     ChevronRight,
     Clock,
+    CreditCard,
     DollarSign,
     Eye,
     FileText,
     Package,
+    Printer,
     Receipt,
     RotateCcw,
     Search,
+    Store,
     TrendingUp,
+    Undo2,
     User
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
@@ -20,7 +24,7 @@ import { returnsService } from "../db/returnsService";
 import { stockAdjustmentService } from "../db/stockAdjustmentService";
 import { useAuthSession, useDebounce, useInvoices } from "../hooks";
 import { Invoice, InvoiceItem } from "../types";
-import { Badge, Button, Card, EmptyState, Modal, useToast } from "./ui";
+import { Badge, Button, Card, ConfirmModal, EmptyState, Modal, useToast } from "./ui";
 
 // Invoice Detail Modal Component
 const InvoiceDetailModal: React.FC<{
