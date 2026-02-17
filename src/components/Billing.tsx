@@ -22,7 +22,7 @@ import { invoiceService } from "../db/invoiceService";
 import { wholesaleStoreService } from "../db/wholesaleStoreService";
 import { useDebounce, useKeyboardShortcut, useProducts } from "../hooks";
 import { CartItem, InvoiceItem, PaymentMode, Product, SaleType, WholesaleStore } from "../types";
-import { shareWholesaleInvoiceOnWhatsApp } from "../utils/shareWhatsApp";
+import { shareInvoiceOnWhatsApp, shareWholesaleInvoiceOnWhatsApp } from "../utils/shareWhatsApp";
 import { Badge, Button, ConfirmModal, useToast } from "./ui";
 
 export const Billing: React.FC = () => {
@@ -333,11 +333,16 @@ export const Billing: React.FC = () => {
           saleType: saleType,
           storeId: saleType === "wholesale" ? selectedStoreId : null,
           storeName: saleType === "wholesale" && selectedStore ? selectedStore.store_name : null,
+          storeContactPerson: saleType === "wholesale" && selectedStore ? selectedStore.contact_person : null,
+          storeContactNumber: saleType === "wholesale" && selectedStore ? selectedStore.contact_number : null,
+          storeAddress: saleType === "wholesale" && selectedStore ? selectedStore.store_address : null,
+          paidAmount: invoiceStatus === "pending" ? 0 : totalAmount,
+          outstandingAmount: invoiceStatus === "pending" ? totalAmount : 0,
           createdAt: new Date().toISOString(),
         });
         invoiceNumberLabel = record.invoice_number;
 
-        // For wholesale, send invoice via WhatsApp instead of printing
+        // Send invoice via WhatsApp after invoice record is saved.
         if (saleType === "wholesale" && selectedStore) {
           const pendingAmount = invoiceStatus === "pending" ? totalAmount : 0;
           try {
@@ -345,6 +350,17 @@ export const Billing: React.FC = () => {
           } catch (whatsappError) {
             console.error("WhatsApp share failed:", whatsappError);
             toast.warning("WhatsApp Failed", "Invoice saved but WhatsApp could not be opened");
+          }
+        } else if (saleType === "retail") {
+          if (record.customer_phone) {
+            try {
+              await shareInvoiceOnWhatsApp(record);
+            } catch (whatsappError) {
+              console.error("WhatsApp share failed:", whatsappError);
+              toast.warning("WhatsApp Failed", "Invoice saved but WhatsApp could not be opened");
+            }
+          } else {
+            toast.info("WhatsApp Skipped", "Retail invoice saved. Add a customer phone number to share on WhatsApp.");
           }
         }
       } catch (error) {

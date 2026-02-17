@@ -97,8 +97,17 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   const storeName = getStoreName(settings.store_name || "Motor Mods");
   const invoiceDate = formatInvoiceDate(invoice.date);
   const statusText = invoice.status === "pending" ? "PENDING" : "PAID";
+  const isWholesale = invoice.sale_type === "wholesale";
   const customerName = invoice.customer_name?.trim() || "Walking Customer";
   const customerPhone = invoice.customer_phone?.trim() || "-";
+  const billToName = isWholesale
+    ? (invoice.store_name?.trim() || customerName || "Wholesale Store")
+    : customerName;
+  const billToContactPerson = invoice.store_contact_person?.trim() || "";
+  const billToPhone = isWholesale
+    ? (invoice.store_contact_number?.trim() || customerPhone || "-")
+    : customerPhone;
+  const billToAddress = isWholesale ? (invoice.store_address?.trim() || "") : "";
 
   const storeAddress = settings.store_address?.trim() || "";
   const storeContact = [settings.store_phone, settings.store_email].filter(Boolean).join("  |  ");
@@ -107,6 +116,14 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
     ? invoice.subtotal
     : invoice.items.reduce((sum, item) => sum + item.total, 0);
   const discount = Math.max(0, subtotal - invoice.grand_total);
+  const isCreditSale = invoice.payment_mode === "credit" || invoice.status === "pending";
+  const derivedPaid = Math.max(0, Math.min(invoice.grand_total, invoice.paid_amount ?? (isCreditSale ? 0 : invoice.grand_total)));
+  const paidAmount = isCreditSale
+    ? invoice.status === "pending"
+      ? derivedPaid
+      : invoice.grand_total
+    : invoice.grand_total;
+  const outstandingAmount = Math.max(0, invoice.outstanding_amount ?? (invoice.grand_total - paidAmount));
 
   const invoiceInfoWidth = 72;
   const invoiceInfoX = pageWidth - margin - invoiceInfoWidth;
@@ -180,14 +197,35 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.setTextColor(15, 23, 42);
-  doc.text(customerName, margin, y + 7);
+  doc.text(billToName, margin, y + 7);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Phone: ${customerPhone}`, pageWidth - margin, y + 7, { align: "right" });
 
-  y += 12;
+  let billToEndY = y + 12;
+  if (isWholesale) {
+    const detailLines: string[] = [];
+    if (billToContactPerson) detailLines.push(`Contact: ${billToContactPerson}`);
+    detailLines.push(`Phone: ${billToPhone}`);
+    if (billToAddress) {
+      const wrappedAddress = doc.splitTextToSize(`Address: ${billToAddress}`, pageWidth - (margin * 2) - 10);
+      detailLines.push(...wrappedAddress);
+    }
+
+    let detailY = y + 12;
+    for (const line of detailLines) {
+      doc.text(line, margin, detailY);
+      detailY += 4.2;
+    }
+
+    doc.text(`Payment: ${(invoice.payment_mode || "cash").toUpperCase()}`, pageWidth - margin, y + 7, { align: "right" });
+    billToEndY = Math.max(billToEndY, detailY + 1);
+  } else {
+    doc.text(`Phone: ${billToPhone}`, pageWidth - margin, y + 7, { align: "right" });
+  }
+
+  y = billToEndY;
   doc.setDrawColor(226, 232, 240);
   doc.line(margin, y, pageWidth - margin, y);
   y += 5;
@@ -238,7 +276,7 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   let blockY = (lastAutoTable?.finalY || y) + 9;
 
   const totalsBoxWidth = 76;
-  const totalsBoxHeight = 30;
+  const totalsBoxHeight = isWholesale ? 42 : 30;
   const totalsX = pageWidth - margin - totalsBoxWidth;
 
   if (blockY + totalsBoxHeight > pageHeight - 24) {
@@ -250,7 +288,13 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
   doc.text("Thank you for your business.", margin, blockY + 2);
-  doc.text("Please keep this invoice for warranty and service references.", margin, blockY + 7);
+  doc.text(
+    isWholesale
+      ? "Please verify this wholesale bill and settle dues as per terms."
+      : "Please keep this invoice for warranty and service references.",
+    margin,
+    blockY + 7
+  );
   doc.text("All amounts are in INR.", margin, blockY + 12);
 
   doc.setDrawColor(203, 213, 225);
@@ -269,6 +313,20 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   doc.text(`- ${asAmount(discount)}`, totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
 
   rowY += 6;
+  if (isWholesale) {
+    doc.text("Paid", totalsX + 4, rowY);
+    doc.text(asAmount(paidAmount), totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+
+    rowY += 6;
+    const dueColor: [number, number, number] = outstandingAmount > 0 ? [185, 28, 28] : [22, 163, 74];
+    doc.setTextColor(71, 85, 105);
+    doc.text("Outstanding Due", totalsX + 4, rowY);
+    doc.setTextColor(dueColor[0], dueColor[1], dueColor[2]);
+    doc.text(asAmount(outstandingAmount), totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+
+    rowY += 6;
+  }
+
   doc.setDrawColor(226, 232, 240);
   doc.line(totalsX + 4, rowY - 3, totalsX + totalsBoxWidth - 4, rowY - 3);
 

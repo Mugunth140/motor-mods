@@ -70,10 +70,19 @@ export const invoiceManagementService = {
     saleType?: SaleType;
     storeId?: string | null;
     storeName?: string | null;
+    storeContactPerson?: string | null;
+    storeContactNumber?: string | null;
+    storeAddress?: string | null;
+    paidAmount?: number;
+    outstandingAmount?: number;
     createdAt?: string;
   }): Promise<InvoiceRecord> {
     const createdAt = params.createdAt || new Date().toISOString();
     const normalizedPhone = normalizePhone(params.customerPhone);
+    const normalizedStoreContact = normalizePhone(params.storeContactNumber);
+    const isCreditSale = (params.paymentMode ?? "cash") === "credit" || (params.status ?? "paid") === "pending";
+    const paidAmount = params.paidAmount ?? (isCreditSale ? 0 : params.grandTotal);
+    const outstandingAmount = params.outstandingAmount ?? Math.max(0, params.grandTotal - paidAmount);
 
     if (!isTauriRuntime()) {
       const records = loadLocalInvoices();
@@ -88,9 +97,15 @@ export const invoiceManagementService = {
         grand_total: params.grandTotal,
         items: params.items,
         status: params.status ?? "paid",
+        payment_mode: params.paymentMode ?? "cash",
         sale_type: params.saleType ?? "retail",
         store_id: params.storeId ?? null,
         store_name: params.storeName ?? null,
+        store_contact_person: params.storeContactPerson ?? null,
+        store_contact_number: normalizedStoreContact,
+        store_address: params.storeAddress ?? null,
+        paid_amount: paidAmount,
+        outstanding_amount: outstandingAmount,
       };
       records.unshift(record);
       saveLocalInvoices(records);
@@ -159,9 +174,15 @@ export const invoiceManagementService = {
       grand_total: params.grandTotal,
       items: params.items,
       status: params.status ?? "paid",
+      payment_mode: params.paymentMode ?? "cash",
       sale_type: params.saleType ?? "retail",
       store_id: params.storeId ?? null,
       store_name: params.storeName ?? null,
+      store_contact_person: params.storeContactPerson ?? null,
+      store_contact_number: normalizedStoreContact,
+      store_address: params.storeAddress ?? null,
+      paid_amount: paidAmount,
+      outstanding_amount: outstandingAmount,
     };
 
     await persistInvoicePdf(record);
@@ -231,29 +252,52 @@ export const invoiceManagementService = {
       sale_type: string | null;
       store_id: string | null;
       store_name: string | null;
+      store_contact_person: string | null;
+      store_contact_number: string | null;
+      store_address: string | null;
+      paid_amount: number | null;
     }[]>(
-      `SELECT i.id, i.invoice_number, i.date, i.customer_name, i.customer_phone, i.subtotal, i.grand_total, i.items, i.status, i.payment_mode, i.sale_type, i.store_id, s.store_name
+      `SELECT i.id, i.invoice_number, i.date, i.customer_name, i.customer_phone, i.subtotal, i.grand_total, i.items, i.status, i.payment_mode, i.sale_type, i.store_id, s.store_name,
+              s.contact_person as store_contact_person, s.contact_number as store_contact_number, s.store_address as store_address,
+              COALESCE((SELECT SUM(cp.amount) FROM credit_payments cp WHERE cp.invoice_id = i.id), 0) as paid_amount
        FROM invoices i
        LEFT JOIN wholesale_stores s ON i.store_id = s.id
        WHERE i.invoice_number IS NOT NULL
        ORDER BY i.date DESC`
     );
 
-    return rows.map((row) => ({
-      id: row.id,
-      invoice_number: row.invoice_number,
-      date: row.date,
-      customer_name: row.customer_name,
-      customer_phone: row.customer_phone,
-      subtotal: row.subtotal ?? 0,
-      grand_total: row.grand_total ?? 0,
-      items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
-      status: row.status === "pending" ? "pending" : "paid",
-      payment_mode: (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash",
-      sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
-      store_id: row.store_id ?? null,
-      store_name: row.store_name ?? null,
-    }));
+    return rows.map((row) => {
+      const status = row.status === "pending" ? "pending" : "paid";
+      const paymentMode = (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash";
+      const grandTotal = row.grand_total ?? 0;
+      const isCreditSale = paymentMode === "credit" || status === "pending";
+      const paidAmount = isCreditSale
+        ? status === "pending"
+          ? Math.min(grandTotal, row.paid_amount ?? 0)
+          : grandTotal
+        : grandTotal;
+
+      return {
+        id: row.id,
+        invoice_number: row.invoice_number,
+        date: row.date,
+        customer_name: row.customer_name,
+        customer_phone: row.customer_phone,
+        subtotal: row.subtotal ?? 0,
+        grand_total: grandTotal,
+        items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
+        status,
+        payment_mode: paymentMode,
+        sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
+        store_id: row.store_id ?? null,
+        store_name: row.store_name ?? null,
+        store_contact_person: row.store_contact_person ?? null,
+        store_contact_number: row.store_contact_number ?? null,
+        store_address: row.store_address ?? null,
+        paid_amount: paidAmount,
+        outstanding_amount: Math.max(0, grandTotal - paidAmount),
+      };
+    });
   },
 
   async getInvoiceRecordById(id: string): Promise<InvoiceRecord | null> {
@@ -277,8 +321,14 @@ export const invoiceManagementService = {
       sale_type: string | null;
       store_id: string | null;
       store_name: string | null;
+      store_contact_person: string | null;
+      store_contact_number: string | null;
+      store_address: string | null;
+      paid_amount: number | null;
     }[]>(
-      `SELECT i.id, i.invoice_number, i.date, i.customer_name, i.customer_phone, i.subtotal, i.grand_total, i.items, i.status, i.payment_mode, i.sale_type, i.store_id, s.store_name
+      `SELECT i.id, i.invoice_number, i.date, i.customer_name, i.customer_phone, i.subtotal, i.grand_total, i.items, i.status, i.payment_mode, i.sale_type, i.store_id, s.store_name,
+              s.contact_person as store_contact_person, s.contact_number as store_contact_number, s.store_address as store_address,
+              COALESCE((SELECT SUM(cp.amount) FROM credit_payments cp WHERE cp.invoice_id = i.id), 0) as paid_amount
        FROM invoices i
        LEFT JOIN wholesale_stores s ON i.store_id = s.id
        WHERE i.id = $1
@@ -289,6 +339,16 @@ export const invoiceManagementService = {
     const row = rows[0];
     if (!row) return null;
 
+    const status = row.status === "pending" ? "pending" : "paid";
+    const paymentMode = (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash";
+    const grandTotal = row.grand_total ?? 0;
+    const isCreditSale = paymentMode === "credit" || status === "pending";
+    const paidAmount = isCreditSale
+      ? status === "pending"
+        ? Math.min(grandTotal, row.paid_amount ?? 0)
+        : grandTotal
+      : grandTotal;
+
     return {
       id: row.id,
       invoice_number: row.invoice_number,
@@ -296,13 +356,18 @@ export const invoiceManagementService = {
       customer_name: row.customer_name,
       customer_phone: row.customer_phone,
       subtotal: row.subtotal ?? 0,
-      grand_total: row.grand_total ?? 0,
+      grand_total: grandTotal,
       items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
-      status: row.status === "pending" ? "pending" : "paid",
-      payment_mode: (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash",
+      status,
+      payment_mode: paymentMode,
       sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
       store_id: row.store_id ?? null,
       store_name: row.store_name ?? null,
+      store_contact_person: row.store_contact_person ?? null,
+      store_contact_number: row.store_contact_number ?? null,
+      store_address: row.store_address ?? null,
+      paid_amount: paidAmount,
+      outstanding_amount: Math.max(0, grandTotal - paidAmount),
     };
   },
 };

@@ -85,7 +85,11 @@ export interface InvoiceRecord {
   sale_type?: SaleType;
   store_id?: string | null;
   store_name?: string | null;
+  store_contact_person?: string | null;
+  store_contact_number?: string | null;
+  store_address?: string | null;
   paid_amount?: number;
+  outstanding_amount?: number;
 }
 
 // ============================================

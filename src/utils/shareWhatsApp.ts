@@ -42,10 +42,12 @@ const buildProfessionalMessage = (invoice: InvoiceRecord): string => {
 
 const toFileUri = (filePath: string) => `file:///${filePath.replace(/\\/g, "/")}`;
 
-export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<void> => {
-  const phone = normalizeWhatsAppPhone(invoice.customer_phone);
-  const pdfName = getInvoiceFilename(invoice.invoice_number);
-  const message = buildProfessionalMessage(invoice);
+const openWhatsAppWithInvoiceAttachment = async (
+  phone: string,
+  message: string,
+  invoiceNumber: string
+): Promise<void> => {
+  const pdfName = getInvoiceFilename(invoiceNumber);
   const text = encodeURIComponent(`${message}\n\nAttachment: ${pdfName}`);
 
   const desktopDeepLink = `whatsapp://send?phone=${phone}&text=${text}`;
@@ -57,7 +59,7 @@ export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<vo
       let pdfPath: string | null = null;
 
       try {
-        pdfPath = await resolveExistingInvoicePdfPath(invoice.invoice_number);
+        pdfPath = await resolveExistingInvoicePdfPath(invoiceNumber);
       } catch {
         // Continue with text-only deep link if PDF path cannot be resolved.
       }
@@ -127,6 +129,12 @@ export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<vo
   }
 };
 
+export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<void> => {
+  const phone = normalizeWhatsAppPhone(invoice.customer_phone);
+  const message = buildProfessionalMessage(invoice);
+  await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number);
+};
+
 /**
  * Build a professional WhatsApp message for wholesale invoices.
  * Includes line items, total, and pending amount info for credit invoices.
@@ -154,9 +162,9 @@ const buildWholesaleMessage = (
     "",
     `Here is your wholesale invoice from *MotorMods*.`,
     "",
-    `📄 Invoice No: ${invoice.invoice_number}`,
-    `📅 Date: ${invoiceDate}`,
-    `🏪 Store: ${store.store_name}`,
+    `Invoice No: ${invoice.invoice_number}`,
+    `Date: ${invoiceDate}`,
+    `Store: ${store.store_name}`,
     "",
     `*Items:*`,
     itemLines,
@@ -170,11 +178,11 @@ const buildWholesaleMessage = (
       maximumFractionDigits: 2,
     });
     lines.push("");
-    lines.push(`⚠️ *Payment Pending: ₹${pending}*`);
+    lines.push(`*Payment Pending: ₹${pending}*`);
     lines.push(`Please clear the pending amount at your earliest convenience.`);
   } else {
     lines.push("");
-    lines.push(`✅ Payment received. Thank you!`);
+    lines.push(`Payment received. Thank you!`);
   }
 
   lines.push("");
@@ -195,48 +203,7 @@ export const shareWholesaleInvoiceOnWhatsApp = async (
 ): Promise<void> => {
   const phone = normalizeWhatsAppPhone(store.contact_number);
   const message = buildWholesaleMessage(invoice, store, pendingAmount);
-  const text = encodeURIComponent(message);
-
-  const desktopDeepLink = `whatsapp://send?phone=${phone}&text=${text}`;
-  const webFallbackUrl = `https://wa.me/${phone}?text=${text}`;
-
-  if (isTauriRuntime()) {
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-
-      const deeplinks = [desktopDeepLink];
-      let opened = false;
-      for (const link of deeplinks) {
-        try {
-          await openUrl(link);
-          opened = true;
-          break;
-        } catch {
-          // Try the next variant.
-        }
-      }
-      if (!opened) {
-        await openUrl(webFallbackUrl);
-      }
-      return;
-    } catch {
-      // Fall through to browser fallback.
-    }
-  }
-
-  try {
-    const openerModule = await import("@tauri-apps/plugin-opener");
-    if (openerModule.openUrl) {
-      await openerModule.openUrl(webFallbackUrl);
-      return;
-    }
-  } catch {
-    // Fall back to browser open.
-  }
-
-  if (typeof window !== "undefined") {
-    window.open(webFallbackUrl, "_blank");
-  }
+  await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number);
 };
 
 /**
@@ -260,7 +227,7 @@ export const sharePaymentReceiptOnWhatsApp = async (params: {
   const lines = [
     `Hello ${store.contact_person || store.store_name},`,
     "",
-    `💰 *Payment Receipt — MotorMods*`,
+    `*Payment Receipt — MotorMods*`,
     "",
     `Invoice: ${invoiceNumber}`,
     `Payment Mode: ${paymentMode.toUpperCase()}`,
@@ -271,8 +238,8 @@ export const sharePaymentReceiptOnWhatsApp = async (params: {
     `Pending: ₹${fmt(pendingAmount)}`,
     "",
     pendingAmount <= 0
-      ? `✅ All dues cleared. Thank you!`
-      : `⚠️ Remaining balance: ₹${fmt(pendingAmount)}`,
+      ? `All dues cleared. Thank you!`
+      : `Remaining balance: ₹${fmt(pendingAmount)}`,
     "",
     "Thank you for your payment!",
     "— MotorMods",
