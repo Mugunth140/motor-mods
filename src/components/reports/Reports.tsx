@@ -1,10 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { creditService } from "../../db/creditService";
 import { reportService } from "../../db/reportService";
-import { FSNClassification } from "../../types";
+import { CreditInvoiceSummary, FSNClassification, PaymentMode } from "../../types";
 import { ReportIntent, ReportKind } from "../../types/notifications";
 import { exportTableToCsv, exportTableToPdf, TableColumn } from "../../utils/reportExport";
 import { Badge, Button, Card, Input, useToast } from "../ui";
 import { ReportTable } from "./ReportTable";
+import {
+    CreditCard,
+    IndianRupee,
+    BarChart3,
+    TrendingUp,
+} from "lucide-react";
 
 type SortKey = "date" | "quantity" | "amount";
 
@@ -24,6 +31,19 @@ export const Reports: React.FC<{ intent?: ReportIntent | null }> = ({ intent }) 
 
   const [isLoading, setIsLoading] = useState(false);
   const [rows, setRows] = useState<Record<string, any>[]>([]);
+  const [creditLedger, setCreditLedger] = useState<CreditInvoiceSummary[]>([]);
+
+  useEffect(() => {
+    const loadCreditData = async () => {
+      try {
+        const data = await creditService.getCreditLedger();
+        setCreditLedger(data);
+      } catch (error) {
+        console.error("Failed to load credit report data:", error);
+      }
+    };
+    loadCreditData();
+  }, []);
 
   useEffect(() => {
     if (!intent) return;
@@ -169,6 +189,45 @@ export const Reports: React.FC<{ intent?: ReportIntent | null }> = ({ intent }) 
 
     return copy;
   }, [rows, active, sortKey]);
+
+  const creditInsights = useMemo(() => {
+    const creditOnly = creditLedger.filter((entry) => (entry.invoice.payment_mode ?? "cash") === "credit");
+    const totalBilled = creditOnly.reduce((sum, e) => sum + e.invoice.grand_total, 0);
+    const totalOutstanding = creditOnly.reduce((sum, e) => sum + e.outstanding, 0);
+    const totalCollected = totalBilled - totalOutstanding;
+    const collectionRate = totalBilled > 0 ? (totalCollected / totalBilled) * 100 : 0;
+
+    const paymentModeCount: Record<PaymentMode, number> = {
+      cash: 0,
+      upi: 0,
+      card: 0,
+      credit: 0,
+      cheque: 0,
+    };
+
+    creditLedger.forEach((entry) => {
+      const mode = (entry.invoice.payment_mode ?? "cash") as PaymentMode;
+      paymentModeCount[mode] += 1;
+    });
+
+    const topOutstanding = [...creditOnly]
+      .sort((a, b) => b.outstanding - a.outstanding)
+      .slice(0, 5);
+
+    return {
+      totalCreditBills: creditOnly.length,
+      totalBilled,
+      totalOutstanding,
+      totalCollected,
+      collectionRate,
+      paymentModeCount,
+      topOutstanding,
+      paymentModeBars: (["cash", "upi", "card", "credit"] as PaymentMode[]).map((mode) => ({
+        label: mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1),
+        count: paymentModeCount[mode],
+      })),
+    };
+  }, [creditLedger]);
 
   const runReport = async () => {
     setIsLoading(true);
@@ -358,6 +417,94 @@ export const Reports: React.FC<{ intent?: ReportIntent | null }> = ({ intent }) 
 
   return (
     <div className="flex flex-col gap-6 pb-8">
+      {/* Credit Reports Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <Card className="p-4 border-l-4 border-l-amber-500">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Credit Bills</p>
+              <p className="text-2xl font-bold text-slate-800">{creditInsights.totalCreditBills}</p>
+            </div>
+            <CreditCard size={20} className="text-amber-500" />
+          </div>
+        </Card>
+
+        <Card className="p-4 border-l-4 border-l-indigo-500">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Credit Billed</p>
+              <p className="text-2xl font-bold text-slate-800">₹{creditInsights.totalBilled.toLocaleString()}</p>
+            </div>
+            <IndianRupee size={20} className="text-indigo-500" />
+          </div>
+        </Card>
+
+        <Card className="p-4 border-l-4 border-l-red-500">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Credit Outstanding</p>
+              <p className="text-2xl font-bold text-red-600">₹{creditInsights.totalOutstanding.toLocaleString()}</p>
+            </div>
+            <BarChart3 size={20} className="text-red-500" />
+          </div>
+        </Card>
+
+        <Card className="p-4 border-l-4 border-l-emerald-500">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Collection Rate</p>
+              <p className="text-2xl font-bold text-emerald-600">{creditInsights.collectionRate.toFixed(1)}%</p>
+            </div>
+            <TrendingUp size={20} className="text-emerald-500" />
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">Payment Mode Distribution</h3>
+          <div className="space-y-3">
+            {creditInsights.paymentModeBars.map((item) => {
+              const max = Math.max(1, ...creditInsights.paymentModeBars.map((b) => b.count));
+              const width = (item.count / max) * 100;
+              return (
+                <div key={item.label}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="font-medium text-slate-600">{item.label}</span>
+                    <span className="text-slate-500">{item.count}</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${item.label === "Credit" ? "bg-amber-500" : "bg-indigo-500"}`}
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">Top Outstanding Credit Bills</h3>
+          {creditInsights.topOutstanding.length === 0 ? (
+            <p className="text-sm text-slate-400">No credit outstanding entries.</p>
+          ) : (
+            <div className="space-y-2">
+              {creditInsights.topOutstanding.map((entry) => (
+                <div key={entry.invoice.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-50">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">#{entry.invoice.invoice_number}</p>
+                    <p className="text-xs text-slate-500">{entry.store.store_name}</p>
+                  </div>
+                  <p className="text-sm font-bold text-red-600">₹{entry.outstanding.toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
       <Card className="p-0 overflow-hidden shadow-md">
         <div className="p-5 border-b border-slate-100 bg-white flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-2 flex-wrap">

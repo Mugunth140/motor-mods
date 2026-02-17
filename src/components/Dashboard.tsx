@@ -4,6 +4,7 @@ import {
     ArrowUpRight,
     BarChart3,
     Calendar,
+    CreditCard,
     DollarSign,
     Package,
     RotateCcw,
@@ -11,10 +12,11 @@ import {
     TrendingUp
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
+import { creditService } from "../db/creditService";
 import { invoiceService } from "../db/invoiceService";
 import { returnsService } from "../db/returnsService";
 import { useInvoices, useProducts } from "../hooks";
-import { Invoice } from "../types";
+import { CreditInvoiceSummary, Invoice, PaymentMode } from "../types";
 import { Card } from "./ui";
 
 interface DashboardProps {
@@ -241,6 +243,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         lastMonthAmount: 0,
     });
     const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
+    const [creditLedger, setCreditLedger] = useState<CreditInvoiceSummary[]>([]);
     const [profitStats, setProfitStats] = useState({
         todayProfit: 0,
         todayRevenue: 0,
@@ -320,6 +323,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             }
         };
         loadReturnStats();
+    }, [invoices]);
+
+    useEffect(() => {
+        const loadCreditLedger = async () => {
+            try {
+                const data = await creditService.getCreditLedger();
+                setCreditLedger(data);
+            } catch (error) {
+                console.error("Failed to load credit ledger dashboard stats:", error);
+            }
+        };
+        loadCreditLedger();
     }, [invoices]);
 
     // Get recent invoices
@@ -511,6 +526,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         ];
     }, [products]);
 
+    const paymentModeMetrics = useMemo(() => {
+        const metrics: Record<PaymentMode, { count: number; amount: number }> = {
+            cash: { count: 0, amount: 0 },
+            upi: { count: 0, amount: 0 },
+            card: { count: 0, amount: 0 },
+            credit: { count: 0, amount: 0 },
+            cheque: { count: 0, amount: 0 },
+        };
+
+        invoices.forEach((inv) => {
+            const mode = (inv.payment_mode ?? "cash") as PaymentMode;
+            metrics[mode].count += 1;
+            metrics[mode].amount += inv.total_amount || 0;
+        });
+
+        const chartData = (["cash", "upi", "card", "credit"] as PaymentMode[]).map((mode) => ({
+            label: mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1),
+            value: metrics[mode].count,
+            color: mode === "credit" ? "#f59e0b" : "#6366f1",
+        }));
+
+        return { metrics, chartData };
+    }, [invoices]);
+
+    const creditHealth = useMemo(() => {
+        const creditBills = creditLedger.filter((entry) => (entry.invoice.payment_mode ?? "cash") === "credit");
+        const billed = creditBills.reduce((sum, e) => sum + e.invoice.grand_total, 0);
+        const outstanding = creditBills.reduce((sum, e) => sum + e.outstanding, 0);
+        const collected = billed - outstanding;
+        const rate = billed > 0 ? (collected / billed) * 100 : 0;
+
+        return {
+            count: creditBills.length,
+            billed,
+            collected,
+            outstanding,
+            rate,
+        };
+    }, [creditLedger]);
+
     const formatCurrency = (amount: number): string => {
         if (amount >= 100000) {
             return `₹${(amount / 100000).toFixed(1)}L`;
@@ -634,6 +689,85 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             {monthChange.positive ? <ArrowUpRight size={12} className="ml-0.5" /> : <ArrowDownRight size={12} className="ml-0.5" />}
                         </span>
                         <span className="text-slate-400 ml-2">vs last month</span>
+                    </div>
+                </Card>
+            </div>
+
+            {/* Payment Mode + Credit Analytics */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                <Card className="p-4 border-slate-100 shadow-sm lg:col-span-1">
+                    <p className="text-sm font-medium text-slate-500">Credit Bills</p>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1">
+                        <AnimatedCounter value={creditHealth.count} />
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-3">Total credit invoices</p>
+                </Card>
+
+                <Card className="p-4 border-slate-100 shadow-sm lg:col-span-1">
+                    <p className="text-sm font-medium text-slate-500">Credit Outstanding</p>
+                    <h3 className="text-2xl font-bold text-red-600 mt-1">
+                        <AnimatedCounter value={creditHealth.outstanding} prefix="₹" />
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-3">Pending collections</p>
+                </Card>
+
+                <Card className="p-4 border-slate-100 shadow-sm lg:col-span-1">
+                    <p className="text-sm font-medium text-slate-500">Collection Rate</p>
+                    <h3 className="text-2xl font-bold text-emerald-600 mt-1">
+                        <AnimatedCounter value={creditHealth.rate} decimals={1} suffix="%" />
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-3">Credit recovered</p>
+                </Card>
+
+                <Card className="p-4 border-slate-100 shadow-sm lg:col-span-1">
+                    <p className="text-sm font-medium text-slate-500">Credit Collected</p>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1">
+                        <AnimatedCounter value={creditHealth.collected} prefix="₹" />
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-3">Paid against credit bills</p>
+                </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card className="p-5 border-slate-100 shadow-sm">
+                    <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                        <CreditCard size={18} className="text-indigo-500" />
+                        Payment Mode Mix
+                    </h3>
+                    <SimpleBarChart data={paymentModeMetrics.chartData} height={100} />
+                </Card>
+
+                <Card className="p-5 border-slate-100 shadow-sm">
+                    <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                        <TrendingUp size={18} className="text-emerald-500" />
+                        Credit Utilization
+                    </h3>
+                    <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-slate-600">
+                            <span>Credit Billed</span>
+                            <span>₹{creditHealth.billed.toLocaleString()}</span>
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-amber-500 rounded-full"
+                                style={{ width: `${creditHealth.billed > 0 ? 100 : 0}%` }}
+                            />
+                        </div>
+
+                        <div className="flex justify-between text-xs text-slate-600 mt-3">
+                            <span>Outstanding</span>
+                            <span>₹{creditHealth.outstanding.toLocaleString()}</span>
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-red-500 rounded-full"
+                                style={{ width: `${creditHealth.billed > 0 ? (creditHealth.outstanding / creditHealth.billed) * 100 : 0}%` }}
+                            />
+                        </div>
+
+                        <div className="text-xs text-slate-400 pt-2">
+                            Cash: {paymentModeMetrics.metrics.cash.count} • UPI: {paymentModeMetrics.metrics.upi.count} • Card: {paymentModeMetrics.metrics.card.count} • Credit: {paymentModeMetrics.metrics.credit.count}
+                        </div>
                     </div>
                 </Card>
             </div>
