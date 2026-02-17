@@ -11,6 +11,12 @@ const normalizeWhatsAppPhone = (phone: string | null) => {
   return phone.replace(/\D/g, "");
 };
 
+const ensureWhatsAppPhone = (phone: string, label: string) => {
+  if (!phone || phone.length < 8) {
+    throw new Error(`${label} phone number is missing or invalid for WhatsApp`);
+  }
+};
+
 const formatInvoiceDate = (isoDate: string): string => {
   return new Date(isoDate).toLocaleString("en-IN", {
     day: "2-digit",
@@ -47,6 +53,8 @@ const openWhatsAppWithInvoiceAttachment = async (
   message: string,
   invoiceNumber: string
 ): Promise<void> => {
+  ensureWhatsAppPhone(phone, "Recipient");
+
   const pdfName = getInvoiceFilename(invoiceNumber);
   const text = encodeURIComponent(`${message}\n\nAttachment: ${pdfName}`);
 
@@ -131,14 +139,11 @@ const openWhatsAppWithInvoiceAttachment = async (
 
 export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<void> => {
   const phone = normalizeWhatsAppPhone(invoice.customer_phone);
+  ensureWhatsAppPhone(phone, "Customer");
   const message = buildProfessionalMessage(invoice);
   await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number);
 };
 
-/**
- * Build a professional WhatsApp message for wholesale invoices.
- * Includes line items, total, and pending amount info for credit invoices.
- */
 const buildWholesaleMessage = (
   invoice: InvoiceRecord,
   store: WholesaleStore,
@@ -153,23 +158,23 @@ const buildWholesaleMessage = (
   const itemLines = (invoice.items || [])
     .map(
       (item, i) =>
-        `${i + 1}. ${item.name} × ${item.qty} = ₹${item.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        `${i + 1}. ${item.name} x ${item.qty} = INR ${item.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     )
     .join("\n");
 
   const lines: string[] = [
     `Hello ${store.contact_person || store.store_name},`,
     "",
-    `Here is your wholesale invoice from *MotorMods*.`,
+    "Here is your wholesale invoice from *MotorMods*.",
     "",
     `Invoice No: ${invoice.invoice_number}`,
     `Date: ${invoiceDate}`,
     `Store: ${store.store_name}`,
     "",
-    `*Items:*`,
+    "*Items:*",
     itemLines,
     "",
-    `*Total Amount: ₹${total}*`,
+    `*Total Amount: INR ${total}*`,
   ];
 
   if (pendingAmount > 0) {
@@ -178,38 +183,31 @@ const buildWholesaleMessage = (
       maximumFractionDigits: 2,
     });
     lines.push("");
-    lines.push(`*Payment Pending: ₹${pending}*`);
-    lines.push(`Please clear the pending amount at your earliest convenience.`);
+    lines.push(`*Payment Pending: INR ${pending}*`);
+    lines.push("Please clear the pending amount at your earliest convenience.");
   } else {
     lines.push("");
-    lines.push(`Payment received. Thank you!`);
+    lines.push("Payment received. Thank you!");
   }
 
   lines.push("");
   lines.push("Thank you for your business!");
-  lines.push("— MotorMods");
+  lines.push("- MotorMods");
 
   return lines.join("\n");
 };
 
-/**
- * Share a wholesale invoice on WhatsApp with pending amount info.
- * Uses the store's contact number.
- */
 export const shareWholesaleInvoiceOnWhatsApp = async (
   invoice: InvoiceRecord,
   store: WholesaleStore,
   pendingAmount: number
 ): Promise<void> => {
   const phone = normalizeWhatsAppPhone(store.contact_number);
+  ensureWhatsAppPhone(phone, "Store");
   const message = buildWholesaleMessage(invoice, store, pendingAmount);
   await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number);
 };
 
-/**
- * Build and share a payment receipt message on WhatsApp.
- * Used when a credit payment is recorded for a wholesale invoice.
- */
 export const sharePaymentReceiptOnWhatsApp = async (params: {
   store: WholesaleStore;
   invoiceNumber: string;
@@ -220,6 +218,7 @@ export const sharePaymentReceiptOnWhatsApp = async (params: {
 }): Promise<void> => {
   const { store, invoiceNumber, billAmount, paidAmount, pendingAmount, paymentMode } = params;
   const phone = normalizeWhatsAppPhone(store.contact_number);
+  ensureWhatsAppPhone(phone, "Store");
 
   const fmt = (n: number) =>
     n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -227,22 +226,22 @@ export const sharePaymentReceiptOnWhatsApp = async (params: {
   const lines = [
     `Hello ${store.contact_person || store.store_name},`,
     "",
-    `*Payment Receipt — MotorMods*`,
+    "*Payment Receipt - MotorMods*",
     "",
     `Invoice: ${invoiceNumber}`,
     `Payment Mode: ${paymentMode.toUpperCase()}`,
     `Date: ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
     "",
-    `Bill Amount: ₹${fmt(billAmount)}`,
-    `Paid Now: ₹${fmt(paidAmount)}`,
-    `Pending: ₹${fmt(pendingAmount)}`,
+    `Bill Amount: INR ${fmt(billAmount)}`,
+    `Paid Now: INR ${fmt(paidAmount)}`,
+    `Pending: INR ${fmt(pendingAmount)}`,
     "",
     pendingAmount <= 0
-      ? `All dues cleared. Thank you!`
-      : `Remaining balance: ₹${fmt(pendingAmount)}`,
+      ? "All dues cleared. Thank you!"
+      : `Remaining balance: INR ${fmt(pendingAmount)}`,
     "",
     "Thank you for your payment!",
-    "— MotorMods",
+    "- MotorMods",
   ];
 
   const text = encodeURIComponent(lines.join("\n"));

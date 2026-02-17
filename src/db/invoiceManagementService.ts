@@ -6,6 +6,7 @@ import { getDb } from "./index";
 import { isTauriRuntime } from "./runtime";
 
 const INVOICE_RECORDS_KEY = "motormods_invoice_records_v1";
+const CREDIT_PAYMENTS_KEY = "motormods_credit_payments_v1";
 
 const normalizePhone = (phone: string | null | undefined): string | null => {
   if (!phone) return null;
@@ -36,6 +37,17 @@ const loadLocalInvoices = (): InvoiceRecord[] => {
   }
 };
 
+const loadLocalCreditPayments = (): Array<{ invoice_id: string; amount: number }> => {
+  try {
+    const raw = localStorage.getItem(CREDIT_PAYMENTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Array<{ invoice_id: string; amount: number }>;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const saveLocalInvoices = (records: InvoiceRecord[]) => {
   localStorage.setItem(INVOICE_RECORDS_KEY, JSON.stringify(records));
 };
@@ -54,6 +66,29 @@ const persistInvoicePdf = async (record: InvoiceRecord) => {
   const filename = getInvoiceFilename(record.invoice_number);
   await mkdir("invoices", { baseDir: BaseDirectory.AppConfig, recursive: true });
   await writeFile(`invoices/${filename}`, bytes, { baseDir: BaseDirectory.AppConfig });
+};
+
+const derivePaidAndOutstanding = (params: {
+  grandTotal: number;
+  paymentMode?: PaymentMode;
+  status?: "pending" | "paid" | null;
+  rawPaidAmount?: number | null;
+}) => {
+  const grandTotal = Math.max(0, params.grandTotal || 0);
+  const rawPaidAmount = Number(params.rawPaidAmount ?? 0);
+  const status = params.status === "pending" ? "pending" : "paid";
+  const paymentMode = params.paymentMode ?? "cash";
+  const isCreditSale = paymentMode === "credit" || status === "pending";
+
+  if (!isCreditSale || status === "paid") {
+    return { paidAmount: grandTotal, outstandingAmount: 0 };
+  }
+
+  const paidAmount = Math.max(0, Math.min(grandTotal, Number.isFinite(rawPaidAmount) ? rawPaidAmount : 0));
+  return {
+    paidAmount,
+    outstandingAmount: Math.max(0, grandTotal - paidAmount),
+  };
 };
 
 export const invoiceManagementService = {
@@ -80,9 +115,14 @@ export const invoiceManagementService = {
     const createdAt = params.createdAt || new Date().toISOString();
     const normalizedPhone = normalizePhone(params.customerPhone);
     const normalizedStoreContact = normalizePhone(params.storeContactNumber);
-    const isCreditSale = (params.paymentMode ?? "cash") === "credit" || (params.status ?? "paid") === "pending";
-    const paidAmount = params.paidAmount ?? (isCreditSale ? 0 : params.grandTotal);
-    const outstandingAmount = params.outstandingAmount ?? Math.max(0, params.grandTotal - paidAmount);
+    const { paidAmount: derivedPaidAmount, outstandingAmount: derivedOutstandingAmount } = derivePaidAndOutstanding({
+      grandTotal: params.grandTotal,
+      paymentMode: params.paymentMode,
+      status: params.status,
+      rawPaidAmount: params.paidAmount,
+    });
+    const paidAmount = params.paidAmount ?? derivedPaidAmount;
+    const outstandingAmount = params.outstandingAmount ?? derivedOutstandingAmount;
 
     if (!isTauriRuntime()) {
       const records = loadLocalInvoices();
@@ -234,7 +274,40 @@ export const invoiceManagementService = {
 
   async getInvoiceRecords(): Promise<InvoiceRecord[]> {
     if (!isTauriRuntime()) {
-      return loadLocalInvoices();
+      const records = loadLocalInvoices();
+      const payments = loadLocalCreditPayments();
+      const paidByInvoice = new Map<string, number>();
+
+      for (const payment of payments) {
+        const amount = Number(payment.amount ?? 0);
+        paidByInvoice.set(
+          payment.invoice_id,
+          (paidByInvoice.get(payment.invoice_id) ?? 0) + (Number.isFinite(amount) ? amount : 0)
+        );
+      }
+
+      return records.map((record) => {
+        const paymentMode = record.payment_mode ?? "cash";
+        const status = record.status === "pending" ? "pending" : "paid";
+        const grandTotal = Math.max(0, record.grand_total ?? 0);
+        const { paidAmount, outstandingAmount } = derivePaidAndOutstanding({
+          grandTotal,
+          paymentMode,
+          status,
+          rawPaidAmount: paidByInvoice.get(record.id) ?? record.paid_amount ?? 0,
+        });
+
+        return {
+          ...record,
+          payment_mode: paymentMode,
+          sale_type: record.sale_type ?? "retail",
+          status,
+          subtotal: record.subtotal ?? 0,
+          grand_total: grandTotal,
+          paid_amount: paidAmount,
+          outstanding_amount: outstandingAmount,
+        };
+      });
     }
 
     const db = await getDb();
@@ -270,12 +343,12 @@ export const invoiceManagementService = {
       const status = row.status === "pending" ? "pending" : "paid";
       const paymentMode = (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash";
       const grandTotal = row.grand_total ?? 0;
-      const isCreditSale = paymentMode === "credit" || status === "pending";
-      const paidAmount = isCreditSale
-        ? status === "pending"
-          ? Math.min(grandTotal, row.paid_amount ?? 0)
-          : grandTotal
-        : grandTotal;
+      const { paidAmount, outstandingAmount } = derivePaidAndOutstanding({
+        grandTotal,
+        paymentMode,
+        status,
+        rawPaidAmount: row.paid_amount ?? 0,
+      });
 
       return {
         id: row.id,
@@ -295,14 +368,14 @@ export const invoiceManagementService = {
         store_contact_number: row.store_contact_number ?? null,
         store_address: row.store_address ?? null,
         paid_amount: paidAmount,
-        outstanding_amount: Math.max(0, grandTotal - paidAmount),
+        outstanding_amount: outstandingAmount,
       };
     });
   },
 
   async getInvoiceRecordById(id: string): Promise<InvoiceRecord | null> {
     if (!isTauriRuntime()) {
-      const records = loadLocalInvoices();
+      const records = await this.getInvoiceRecords();
       return records.find((r) => r.id === id) ?? null;
     }
 
@@ -342,12 +415,12 @@ export const invoiceManagementService = {
     const status = row.status === "pending" ? "pending" : "paid";
     const paymentMode = (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash";
     const grandTotal = row.grand_total ?? 0;
-    const isCreditSale = paymentMode === "credit" || status === "pending";
-    const paidAmount = isCreditSale
-      ? status === "pending"
-        ? Math.min(grandTotal, row.paid_amount ?? 0)
-        : grandTotal
-      : grandTotal;
+    const { paidAmount, outstandingAmount } = derivePaidAndOutstanding({
+      grandTotal,
+      paymentMode,
+      status,
+      rawPaidAmount: row.paid_amount ?? 0,
+    });
 
     return {
       id: row.id,
@@ -367,7 +440,7 @@ export const invoiceManagementService = {
       store_contact_number: row.store_contact_number ?? null,
       store_address: row.store_address ?? null,
       paid_amount: paidAmount,
-      outstanding_amount: Math.max(0, grandTotal - paidAmount),
+      outstanding_amount: outstandingAmount,
     };
   },
 };
