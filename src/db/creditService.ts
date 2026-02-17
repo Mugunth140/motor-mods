@@ -138,6 +138,7 @@ export const creditService = {
     const invoices = await this.getWholesaleCreditInvoicesByStore(storeId);
     let outstanding = 0;
     for (const inv of invoices) {
+      if (inv.payment_mode && inv.payment_mode !== "credit") continue;
       const paid = await this.getTotalPaidForInvoice(inv.id);
       outstanding += Math.max(0, inv.grand_total - paid);
     }
@@ -150,7 +151,10 @@ export const creditService = {
   async getWholesaleCreditInvoicesByStore(storeId: string): Promise<InvoiceRecord[]> {
     const allInvoices = await invoiceManagementService.getInvoiceRecords();
     return allInvoices.filter(
-      (inv) => inv.store_id === storeId && inv.sale_type === "wholesale"
+      (inv) =>
+        inv.store_id === storeId &&
+        inv.sale_type === "wholesale" &&
+        (inv.payment_mode === "credit" || inv.status === "pending")
     );
   },
 
@@ -173,11 +177,18 @@ export const creditService = {
       if (!store) continue;
 
       const payments = await this.getPaymentsByInvoice(invoice.id);
-      const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-      const outstanding = Math.max(0, invoice.grand_total - totalPaid);
+      const isCreditSale = invoice.payment_mode === "credit" || invoice.status === "pending";
 
+      let totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+      let outstanding = Math.max(0, invoice.grand_total - totalPaid);
       let status: CreditInvoiceSummary["status"] = "unpaid";
-      if (totalPaid >= invoice.grand_total) {
+
+      // Non-credit wholesale invoices are fully paid at billing time.
+      if (!isCreditSale) {
+        totalPaid = invoice.grand_total;
+        outstanding = 0;
+        status = "paid";
+      } else if (totalPaid >= invoice.grand_total) {
         status = "paid";
       } else if (totalPaid > 0) {
         status = "partial";
@@ -213,7 +224,8 @@ export const creditService = {
     if (!invoice) return;
 
     const totalPaid = await this.getTotalPaidForInvoice(invoiceId);
-    const newStatus = totalPaid >= invoice.grand_total ? "paid" : "pending";
+    const isCreditSale = invoice.payment_mode === "credit" || invoice.status === "pending";
+    const newStatus = isCreditSale && totalPaid < invoice.grand_total ? "pending" : "paid";
 
     if (invoice.status === newStatus) return;
 
@@ -266,6 +278,9 @@ export const creditService = {
       let pendingCount = 0;
 
       for (const inv of storeInvoices) {
+        const isCreditSale = inv.payment_mode === "credit" || inv.status === "pending";
+        if (!isCreditSale) continue;
+
         const paid = paymentsByInvoice.get(inv.id) ?? 0;
         const remaining = Math.max(0, inv.grand_total - paid);
         if (remaining > 0) {
