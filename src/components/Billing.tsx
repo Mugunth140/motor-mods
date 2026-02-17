@@ -633,8 +633,48 @@ export const Billing: React.FC = () => {
             </div>
           ) : (
             /* Retail Customer Section */
-            <>
-            </>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Customer Name (optional)</label>
+                <input
+                  type="text"
+                  placeholder="Walking Customer"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-700 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Phone (optional)</label>
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-700 placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Payment Mode for Retail */}
+              <div className="space-y-1 pt-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Payment Mode</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["cash", "upi", "card"] as PaymentMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setPaymentMode(mode)}
+                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
+                        paymentMode === mode
+                          ? "bg-indigo-50 border-indigo-300 text-indigo-700"
+                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                      }`}
+                    >
+                      {mode === "cash" ? "Cash" : mode === "upi" ? "UPI" : "Card"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 

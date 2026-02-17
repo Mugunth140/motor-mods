@@ -227,13 +227,16 @@ export const invoiceManagementService = {
       grand_total: number;
       items: string | null;
       status: "pending" | "paid" | null;
+      payment_mode: string | null;
       sale_type: string | null;
       store_id: string | null;
+      store_name: string | null;
     }[]>(
-      `SELECT id, invoice_number, date, customer_name, customer_phone, subtotal, grand_total, items, status, sale_type, store_id
-       FROM invoices
-       WHERE invoice_number IS NOT NULL
-       ORDER BY date DESC`
+      `SELECT i.id, i.invoice_number, i.date, i.customer_name, i.customer_phone, i.subtotal, i.grand_total, i.items, i.status, i.payment_mode, i.sale_type, i.store_id, s.store_name
+       FROM invoices i
+       LEFT JOIN wholesale_stores s ON i.store_id = s.id
+       WHERE i.invoice_number IS NOT NULL
+       ORDER BY i.date DESC`
     );
 
     return rows.map((row) => ({
@@ -246,8 +249,10 @@ export const invoiceManagementService = {
       grand_total: row.grand_total ?? 0,
       items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
       status: row.status === "pending" ? "pending" : "paid",
+      payment_mode: (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash",
       sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
       store_id: row.store_id ?? null,
+      store_name: row.store_name ?? null,
     }));
   },
 
@@ -268,12 +273,15 @@ export const invoiceManagementService = {
       grand_total: number;
       items: string | null;
       status: "pending" | "paid" | null;
+      payment_mode: string | null;
       sale_type: string | null;
       store_id: string | null;
+      store_name: string | null;
     }[]>(
-      `SELECT id, invoice_number, date, customer_name, customer_phone, subtotal, grand_total, items, status, sale_type, store_id
-       FROM invoices
-       WHERE id = $1
+      `SELECT i.id, i.invoice_number, i.date, i.customer_name, i.customer_phone, i.subtotal, i.grand_total, i.items, i.status, i.payment_mode, i.sale_type, i.store_id, s.store_name
+       FROM invoices i
+       LEFT JOIN wholesale_stores s ON i.store_id = s.id
+       WHERE i.id = $1
        LIMIT 1`,
       [id]
     );
@@ -291,8 +299,10 @@ export const invoiceManagementService = {
       grand_total: row.grand_total ?? 0,
       items: row.items ? (JSON.parse(row.items) as InvoiceRecordItem[]) : [],
       status: row.status === "pending" ? "pending" : "paid",
+      payment_mode: (row.payment_mode as "cash" | "card" | "upi" | "cheque" | "credit") ?? "cash",
       sale_type: (row.sale_type as "retail" | "wholesale") ?? "retail",
       store_id: row.store_id ?? null,
+      store_name: row.store_name ?? null,
     };
   },
 };

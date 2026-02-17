@@ -1,23 +1,24 @@
 import {
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  DollarSign,
-  Eye,
-  FileText,
-  Package,
-  Printer,
-  Receipt,
-  RotateCcw,
-  Search,
-  TrendingUp,
-  User
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
+    Clock,
+    DollarSign,
+    Eye,
+    FileText,
+    Package,
+    Receipt,
+    RotateCcw,
+    Search,
+    TrendingUp,
+    User
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoiceService } from "../db/invoiceService";
+import { productService } from "../db/productService";
 import { returnsService } from "../db/returnsService";
-import { useDebounce, useInvoices } from "../hooks";
+import { stockAdjustmentService } from "../db/stockAdjustmentService";
+import { useAuthSession, useDebounce, useInvoices } from "../hooks";
 import { Invoice, InvoiceItem } from "../types";
 import { Badge, Button, Card, EmptyState, Modal, useToast } from "./ui";
 
@@ -226,6 +227,7 @@ const InvoiceDetailModal: React.FC<{
 };
 
 export const Invoices: React.FC = () => {
+  const { session } = useAuthSession();
   const { invoices, loading } = useInvoices();
   const toast = useToast();
 
@@ -254,6 +256,10 @@ export const Invoices: React.FC = () => {
   // Track returned invoice IDs
   const [returnedInvoiceIds, setReturnedInvoiceIds] = useState<Set<string>>(new Set());
 
+  // Undo confirmation modal
+  const [undoInvoiceId, setUndoInvoiceId] = useState<string | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
+
   // Load stats and returned IDs
   useEffect(() => {
     const loadData = async () => {
@@ -276,6 +282,7 @@ export const Invoices: React.FC = () => {
     const search = debouncedSearch.toLowerCase();
     return invoices.filter(inv =>
       (inv.customer_name?.toLowerCase() || "walking customer").includes(search) ||
+      (inv.store_name?.toLowerCase() || "").includes(search) ||
       inv.id.toLowerCase().includes(search)
     );
   }, [invoices, debouncedSearch]);
@@ -315,6 +322,45 @@ export const Invoices: React.FC = () => {
     setIsDetailOpen(false);
     setSelectedInvoice(null);
     setInvoiceItems([]);
+  };
+
+  const handleUndoInvoice = async () => {
+    if (!undoInvoiceId) return;
+    
+    setIsUndoing(true);
+    try {
+      // Get invoice items to restore stock
+      const items = await invoiceService.getItems(undoInvoiceId);
+      
+      // Restore stock for each item
+      for (const item of items) {
+        // Add quantity back to product
+        await productService.updateQuantity(item.product_id, item.quantity);
+        
+        // Log stock adjustment
+        await stockAdjustmentService.create(
+          item.product_id,
+          'other',
+          item.quantity,
+          `Undo invoice ${undoInvoiceId.slice(0, 8).toUpperCase()}`,
+          session?.name || 'admin'
+        );
+      }
+      
+      // Delete the invoice
+      await invoiceService.deleteInvoice(undoInvoiceId);
+      
+      toast.success("Invoice Deleted", "Invoice deleted and stock restored successfully");
+      
+      // Refresh invoices list
+      window.location.reload();
+    } catch (error) {
+      console.error("Failed to undo invoice:", error);
+      toast.error("Error", "Failed to delete invoice and restore stock");
+    } finally {
+      setIsUndoing(false);
+      setUndoInvoiceId(null);
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -423,12 +469,19 @@ export const Invoices: React.FC = () => {
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Invoice ID</th>
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Date & Time</th>
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Customer</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Payment Mode</th>
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
                   <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {pagedInvoices.map((inv) => (
+                {pagedInvoices.map((inv) => {
+                  const isWholesale = inv.sale_type === 'wholesale';
+                  const displayName = isWholesale 
+                    ? (inv.store_name || inv.customer_name || "Unknown Store")
+                    : (inv.customer_name || "Walking Customer");
+                  
+                  return (
                   <tr key={inv.id} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="p-4">
                       <div className="flex items-center gap-3">
@@ -450,12 +503,45 @@ export const Invoices: React.FC = () => {
                     </td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center">
-                          <User size={14} className="text-slate-500" />
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                          isWholesale 
+                            ? 'bg-indigo-50' 
+                            : 'bg-slate-100'
+                        }`}>
+                          {isWholesale ? (
+                            <Store size={14} className="text-indigo-600" />
+                          ) : (
+                            <User size={14} className="text-slate-500" />
+                          )}
                         </div>
                         <span className="font-medium text-slate-700">
-                          {inv.customer_name || "Walking Customer"}
+                          {displayName}
                         </span>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-1.5">
+                        {inv.payment_mode === 'credit' ? (
+                          <>
+                            <CreditCard size={14} className="text-amber-500" />
+                            <span className="text-sm font-medium text-amber-700">Credit</span>
+                          </>
+                        ) : inv.payment_mode === 'upi' ? (
+                          <>
+                            <DollarSign size={14} className="text-green-500" />
+                            <span className="text-sm font-medium text-green-700">UPI</span>
+                          </>
+                        ) : inv.payment_mode === 'card' ? (
+                          <>
+                            <CreditCard size={14} className="text-blue-500" />
+                            <span className="text-sm font-medium text-blue-700">Card</span>
+                          </>
+                        ) : (
+                          <>
+                            <DollarSign size={14} className="text-green-500" />
+                            <span className="text-sm font-medium text-green-700">Cash</span>
+                          </>
+                        )}
                       </div>
                     </td>
                     <td className="p-4">
@@ -482,10 +568,22 @@ export const Invoices: React.FC = () => {
                         >
                           View
                         </Button>
+                        {session?.role === 'admin' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setUndoInvoiceId(inv.id)}
+                            leftIcon={<Undo2 size={14} />}
+                            className="hover:bg-red-50 hover:text-red-600"
+                          >
+                            Undo
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -528,6 +626,18 @@ export const Invoices: React.FC = () => {
         invoice={selectedInvoice}
         items={invoiceItems}
         isLoading={isLoadingItems}
+      />
+
+      {/* Undo Invoice Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!undoInvoiceId}
+        onClose={() => setUndoInvoiceId(null)}
+        onConfirm={handleUndoInvoice}
+        title="Undo Invoice"
+        message="This will permanently delete the invoice and restore the stock quantities. This action cannot be reversed."
+        confirmText={isUndoing ? "Deleting..." : "Delete & Restore"}
+        variant="danger"
+        isLoading={isUndoing}
       />
     </div>
   );

@@ -134,8 +134,8 @@ export const invoiceService = {
 
     const createdAt = invoice.created_at || new Date().toISOString();
     await db.execute(
-      "INSERT INTO invoices (id, customer_name, customer_phone, discount_amount, total_amount, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
-      [invoice.id, invoice.customer_name, invoice.customer_phone ?? null, invoice.discount_amount ?? 0, invoice.total_amount, createdAt]
+      "INSERT INTO invoices (id, customer_name, customer_phone, discount_amount, total_amount, payment_mode, sale_type, store_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+      [invoice.id, invoice.customer_name, invoice.customer_phone ?? null, invoice.discount_amount ?? 0, invoice.total_amount, invoice.payment_mode ?? 'cash', invoice.sale_type ?? 'retail', invoice.store_id ?? null, createdAt]
     );
 
     for (const item of items) {
@@ -166,7 +166,7 @@ export const invoiceService = {
     }
     const db = await getDb();
     return await db.select<Invoice[]>(
-      "SELECT id, customer_name, customer_phone, discount_amount, total_amount, created_at FROM invoices ORDER BY created_at DESC"
+      "SELECT i.id, i.customer_name, i.customer_phone, i.discount_amount, i.total_amount, i.created_at, i.payment_mode, i.sale_type, i.store_id, s.store_name FROM invoices i LEFT JOIN wholesale_stores s ON i.store_id = s.id ORDER BY i.created_at DESC"
     );
   },
 
@@ -499,5 +499,28 @@ export const invoiceService = {
   // Disabled for production - no sample data seeding
   async seedData(): Promise<void> {
     // No-op in production
+  },
+
+  async deleteInvoice(invoiceId: string): Promise<void> {
+    if (!isTauriRuntime()) {
+      const invoices = loadInvoices();
+      const invoiceItems = loadInvoiceItems();
+      
+      // Filter out the invoice and its items
+      const filteredInvoices = invoices.filter(inv => inv.id !== invoiceId);
+      const filteredItems = invoiceItems.filter(item => item.invoice_id !== invoiceId);
+      
+      saveInvoices(filteredInvoices);
+      saveInvoiceItems(filteredItems);
+      return;
+    }
+
+    const db = await getDb();
+    
+    // Delete invoice items first (foreign key constraint)
+    await db.execute("DELETE FROM invoice_items WHERE invoice_id = $1", [invoiceId]);
+    
+    // Delete the invoice
+    await db.execute("DELETE FROM invoices WHERE id = $1", [invoiceId]);
   }
 };

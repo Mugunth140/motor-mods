@@ -81,6 +81,7 @@ export interface InvoiceRecord {
   grand_total: number;
   items: InvoiceRecordItem[];
   status: 'pending' | 'paid';
+  payment_mode?: PaymentMode;
   sale_type?: SaleType;
   store_id?: string | null;
   store_name?: string | null;
