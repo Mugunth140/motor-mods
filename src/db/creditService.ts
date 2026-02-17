@@ -76,6 +76,22 @@ export const creditService = {
   },
 
   /**
+   * Delete a payment record (admin only — caller is responsible for auth check).
+   */
+  async deletePayment(paymentId: string, invoiceId: string): Promise<void> {
+    if (!isTauriRuntime()) {
+      const payments = loadPayments().filter((p) => p.id !== paymentId);
+      savePayments(payments);
+      await this.updateInvoiceStatusIfPaid(invoiceId);
+      return;
+    }
+
+    const db = await getDb();
+    await db.execute("DELETE FROM credit_payments WHERE id = $1", [paymentId]);
+    await this.updateInvoiceStatusIfPaid(invoiceId);
+  },
+
+  /**
    * Get all payments for a specific invoice.
    */
   async getPaymentsByInvoice(invoiceId: string): Promise<CreditPayment[]> {

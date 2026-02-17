@@ -212,7 +212,6 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
       sku: product.sku || "",
       category: product.category || "",
       price: product.price.toString(),
-      wholesale_price: (product.wholesale_price ?? 0).toString(),
       quantity: product.quantity.toString(),
       barcode: product.barcode || "",
       purchase_price: (product.purchase_price ?? 0).toString(),
@@ -308,7 +307,6 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
           sku: formData.sku.trim() || null,
           category: formData.category.trim() || null,
           price: parseFloat(formData.price) || 0,
-          wholesale_price: parseFloat(formData.wholesale_price) || 0,
           purchase_price: parseFloat(formData.purchase_price) || 0,
           quantity: parseInt(formData.quantity) || 0,
           reorder_level: parseInt(formData.reorder_level) || 5,
@@ -322,7 +320,6 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
           sku: formData.sku.trim() || null,
           category: formData.category.trim() || null,
           price: parseFloat(formData.price) || 0,
-          wholesale_price: parseFloat(formData.wholesale_price) || 0,
           purchase_price: parseFloat(formData.purchase_price) || 0,
           quantity: parseInt(formData.quantity) || 0,
           reorder_level: parseInt(formData.reorder_level) || 5,
@@ -595,17 +592,6 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
                   </th>
                   <th
                     className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 select-none group"
-                    onClick={() => handleSort('wholesale_price')}
-                  >
-                    <div className="flex items-center gap-1">
-                      Wholesale
-                      {sortState.key === 'wholesale_price' && (
-                        sortState.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                      )}
-                    </div>
-                  </th>
-                  <th
-                    className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 select-none group"
                     onClick={() => handleSort('quantity')}
                   >
                     <div className="flex items-center gap-1">
@@ -651,7 +637,6 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
                       </span>
                     </td>
                     <td className="p-4 font-bold text-slate-700">₹{p.price.toLocaleString()}</td>
-                    <td className="p-4 text-slate-600">{p.wholesale_price ? `₹${p.wholesale_price.toLocaleString()}` : <span className="text-slate-400">—</span>}</td>
                     <td className="p-4">{getStockBadge(p.quantity)}</td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -779,16 +764,6 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
               required
             />
           </div>
-
-          <Input
-            label="Wholesale Price (₹)"
-            type="number"
-            placeholder="0.00 (optional)"
-            value={formData.wholesale_price}
-            onChange={(e) => setFormData({ ...formData, wholesale_price: e.target.value })}
-            step="0.01"
-            min="0"
-          />
 
           <div className="grid grid-cols-2 gap-4">
             <Input

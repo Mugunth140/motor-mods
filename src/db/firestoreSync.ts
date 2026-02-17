@@ -114,7 +114,6 @@ interface FirestoreProduct {
     sku: string | null;
     category: string | null;
     price: number;
-    wholesale_price: number;
     quantity: number;
     barcode: string | null;
     purchase_price: number;
@@ -136,7 +135,6 @@ const toFirestoreProduct = (product: Product): Omit<FirestoreProduct, 'synced_at
     sku: product.sku ?? null,
     category: product.category ?? null,
     price: product.price ?? 0,
-    wholesale_price: product.wholesale_price ?? 0,
     quantity: product.quantity ?? 0,
     barcode: product.barcode ?? null,
     purchase_price: product.purchase_price ?? 0,

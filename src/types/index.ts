@@ -8,7 +8,6 @@ export interface Product {
   sku: string | null;
   category: string | null;
   price: number;
-  wholesale_price: number;
   quantity: number;
   barcode: string | null;
   purchase_price: number;
@@ -251,7 +250,6 @@ export interface ProductFormData {
   sku: string;
   category: string;
   price: string;
-  wholesale_price: string;
   quantity: string;
   barcode: string;
   purchase_price: string;
@@ -264,7 +262,6 @@ export const emptyProductForm: ProductFormData = {
   sku: "",
   category: "",
   price: "",
-  wholesale_price: "",
   quantity: "",
   barcode: "",
   purchase_price: "",

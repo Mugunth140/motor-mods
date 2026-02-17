@@ -1,6 +1,8 @@
 import {
   Check,
+  ChevronDown,
   CreditCard,
+  Edit2,
   Keyboard,
   Minus,
   Package,
@@ -54,6 +56,9 @@ export const Billing: React.FC = () => {
   // Clear cart confirmation
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  // Custom prices for wholesale items (biller-decided per-item pricing)
+  const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+
   // Load wholesale stores
   useEffect(() => {
     const loadStores = async () => {
@@ -89,6 +94,7 @@ export const Billing: React.FC = () => {
     setCustomerName("");
     setCustomerPhone("");
     setPaymentMode("cash");
+    setCustomPrices({});
   };
 
   const selectedStore = useMemo(
@@ -97,13 +103,14 @@ export const Billing: React.FC = () => {
   );
 
   const getProductPrice = useCallback(
-    (product: Product) => {
-      if (saleType === "wholesale" && product.wholesale_price > 0) {
-        return product.wholesale_price;
+    (product: Product | CartItem) => {
+      // For wholesale, check if biller has set a custom price
+      if (saleType === "wholesale" && customPrices[product.id] !== undefined) {
+        return customPrices[product.id];
       }
       return product.price;
     },
-    [saleType]
+    [saleType, customPrices]
   );
 
   const filteredProducts = useMemo(() => {
@@ -218,6 +225,7 @@ export const Billing: React.FC = () => {
     setDiscount("");
     setPaymentMode("cash");
     setSelectedStoreId("");
+    setCustomPrices({});
     setShowClearConfirm(false);
     toast.info("Cart Cleared", "All items have been removed");
   };
@@ -356,6 +364,7 @@ export const Billing: React.FC = () => {
       setCustomerPhone("");
       setDiscount("");
       setPaymentMode("cash");
+      setCustomPrices({});
       setIsCheckingOut(false);
 
       // Refresh product quantities
@@ -384,7 +393,7 @@ export const Billing: React.FC = () => {
   }
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-8rem)] animate-in fade-in duration-500">
+    <div className="flex gap-5 h-[calc(100vh-7rem)] animate-in fade-in duration-500">
       {/* Product Selection Area */}
       <div className="flex-1 flex flex-col gap-4">
         {/* Search Bar with Keyboard Hint */}
@@ -495,9 +504,6 @@ export const Billing: React.FC = () => {
                       <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
                         <div className="flex flex-col">
                           <span className="text-base font-bold text-slate-900">₹{displayPrice.toLocaleString()}</span>
-                          {saleType === "wholesale" && p.wholesale_price > 0 && p.wholesale_price !== p.price && (
-                            <span className="text-[10px] text-slate-400 line-through">₹{p.price.toLocaleString()}</span>
-                          )}
                         </div>
                         <div
                           className={`w-7 h-7 rounded-full flex items-center justify-center transition-all
@@ -521,7 +527,7 @@ export const Billing: React.FC = () => {
       {/* Cart Sidebar */}
       <div className="w-96 flex flex-col h-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
         {/* Sale Type Toggle */}
-        <div className="p-3 border-b border-slate-100 bg-slate-50/80">
+        <div className="p-3 border-b border-slate-100 bg-slate-50/80 shrink-0">
           <div className="flex bg-slate-200 rounded-xl p-1">
             <button
               onClick={() => handleSaleTypeChange("retail")}
@@ -548,22 +554,8 @@ export const Billing: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-5 border-b border-slate-100 bg-slate-50/80 backdrop-blur-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              <ShoppingCart className="text-indigo-600" size={20} />
-              {saleType === "wholesale" ? "Wholesale Order" : "Current Order"}
-            </h2>
-            {cart.length > 0 && (
-              <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded-full border border-indigo-200">
-                {totalItems} items
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Customer / Store Section */}
-        <div className="p-4 border-b border-slate-100 bg-white space-y-3">
+        {/* Customer / Store + Payment Section */}
+        <div className="p-4 border-b border-slate-100 bg-white space-y-3 shrink-0">
           {saleType === "wholesale" ? (
             /* Store Selector */
             <div className="space-y-2">
@@ -600,48 +592,23 @@ export const Billing: React.FC = () => {
                   )}
                 </div>
               </div>
-              {selectedStore && (
-                <div className="text-xs text-slate-500 px-1 space-y-0.5">
-                  <p>📞 {selectedStore.contact_number || "No phone"}</p>
-                  {selectedStore.credit_limit > 0 && (
-                    <p>💳 Per-sale credit limit: ₹{selectedStore.credit_limit.toLocaleString()}</p>
-                  )}
-                </div>
+              {selectedStore && selectedStore.credit_limit > 0 && (
+                <p className="text-xs text-slate-500 px-1">
+                  Credit limit: ₹{selectedStore.credit_limit.toLocaleString()} / sale
+                </p>
               )}
-
-              {/* Payment Mode for Wholesale */}
-              <div className="space-y-1 pt-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Payment Mode</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["cash", "upi", "card", "credit"] as PaymentMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setPaymentMode(mode)}
-                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                        paymentMode === mode
-                          ? mode === "credit"
-                            ? "bg-amber-50 border-amber-300 text-amber-700"
-                            : "bg-indigo-50 border-indigo-300 text-indigo-700"
-                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
-                      }`}
-                    >
-                      {mode === "credit" ? "Credit" : mode === "cash" ? "Cash" : mode === "upi" ? "UPI" : "Card"}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           ) : (
             /* Retail Customer Section */
-            <div className="space-y-4">
+            <div className="space-y-2">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Customer Name (optional)</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Customer (optional)</label>
                 <input
                   type="text"
                   placeholder="Walking Customer"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-700 placeholder:text-slate-400"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-700 placeholder:text-slate-400"
                 />
               </div>
               <div className="space-y-1">
@@ -651,98 +618,147 @@ export const Billing: React.FC = () => {
                   placeholder="+91 98765 43210"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-700 placeholder:text-slate-400"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-700 placeholder:text-slate-400"
                 />
-              </div>
-
-              {/* Payment Mode for Retail */}
-              <div className="space-y-1 pt-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Payment Mode</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["cash", "upi", "card"] as PaymentMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setPaymentMode(mode)}
-                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                        paymentMode === mode
-                          ? "bg-indigo-50 border-indigo-300 text-indigo-700"
-                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
-                      }`}
-                    >
-                      {mode === "cash" ? "Cash" : mode === "upi" ? "UPI" : "Card"}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           )}
+
+          {/* Payment Mode Dropdown */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Payment Mode</label>
+            <div className="relative">
+              <select
+                value={paymentMode}
+                onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}
+                className={`w-full appearance-none px-3 py-2.5 text-sm font-semibold border rounded-xl outline-none cursor-pointer transition-all pr-10 ${
+                  paymentMode === "credit"
+                    ? "bg-amber-50 border-amber-300 text-amber-700 focus:ring-2 focus:ring-amber-200"
+                    : "bg-slate-50 border-slate-200 text-slate-700 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                }`}
+              >
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="card">Card</option>
+                {saleType === "wholesale" && <option value="credit">Credit (Pay Later)</option>}
+              </select>
+              <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
         </div>
 
-        {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/30 custom-scrollbar">
+        {/* Cart Header */}
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between shrink-0">
+          <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+            <ShoppingCart size={16} className="text-indigo-600" />
+            {saleType === "wholesale" ? "Wholesale Order" : "Cart"}
+          </h2>
+          {cart.length > 0 && (
+            <span className="bg-indigo-100 text-indigo-700 text-[11px] font-bold px-2 py-0.5 rounded-full border border-indigo-200">
+              {totalItems} items
+            </span>
+          )}
+        </div>
+
+        {/* Cart Items — scrollable */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-slate-50/30 custom-scrollbar">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-60">
-              <ShoppingCart size={48} className="text-slate-300 mb-3" />
-              <p className="text-slate-500 font-medium">Cart is empty</p>
-              <p className="text-xs text-slate-400">Select products to add</p>
+              <ShoppingCart size={40} className="text-slate-300 mb-3" />
+              <p className="text-slate-500 font-medium text-sm">Cart is empty</p>
+              <p className="text-xs text-slate-400">Click products to add</p>
             </div>
           ) : (
             cart.map((item) => {
               const price = getProductPrice(item);
+              const hasCustomPrice = saleType === "wholesale" && customPrices[item.id] !== undefined;
               return (
-              <div
-                key={item.id}
-                className="flex gap-3 p-3 rounded-xl bg-white border border-slate-200 shadow-sm group hover:border-indigo-300 transition-all"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-800 text-sm truncate">{item.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">₹{price.toLocaleString()} / unit</p>
-                  {saleType === "wholesale" && item.wholesale_price > 0 && item.wholesale_price !== item.price && (
-                    <p className="text-[10px] text-slate-400 line-through">Retail: ₹{item.price.toLocaleString()}</p>
-                  )}
-                </div>
+                <div
+                  key={item.id}
+                  className="p-3 rounded-xl bg-white border border-slate-200 shadow-sm group hover:border-indigo-300 transition-all"
+                >
+                  <div className="flex gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-800 text-sm truncate">{item.name}</p>
+                      {/* Inline price editing for wholesale */}
+                      {saleType === "wholesale" ? (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <button
+                            onClick={() => {
+                              const current = customPrices[item.id] ?? item.price;
+                              const input = prompt(`Set price for ${item.name}`, String(current));
+                              if (input !== null) {
+                                const newPrice = parseFloat(input);
+                                if (Number.isFinite(newPrice) && newPrice >= 0) {
+                                  setCustomPrices(prev => ({ ...prev, [item.id]: newPrice }));
+                                }
+                              }
+                            }}
+                            className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 transition-colors"
+                            title="Edit price"
+                          >
+                            <Edit2 size={10} />
+                            <span className={`font-medium ${hasCustomPrice ? "text-indigo-700" : "text-slate-500"}`}>
+                              ₹{price.toLocaleString()}
+                            </span>
+                          </button>
+                          {hasCustomPrice && (
+                            <span className="text-[10px] text-slate-400 line-through">₹{item.price.toLocaleString()}</span>
+                          )}
+                          <span className="text-[10px] text-slate-400">/ unit</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 mt-0.5">₹{price.toLocaleString()} / unit</p>
+                      )}
+                    </div>
 
-                <div className="flex flex-col items-end gap-2">
-                  <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (item.cartQuantity === 1) {
-                          removeFromCart(item.id);
-                        } else {
-                          updateCartQuantity(item.id, -1);
-                        }
-                      }}
-                      className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-white hover:shadow-sm text-slate-600 transition-all"
-                    >
-                      {item.cartQuantity === 1 ? <Trash2 size={12} className="text-red-500" /> : <Minus size={12} />}
-                    </button>
-                    <span className="text-xs font-bold w-6 text-center text-slate-700">{item.cartQuantity}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        updateCartQuantity(item.id, 1);
-                      }}
-                      disabled={item.cartQuantity >= item.quantity}
-                      className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-white hover:shadow-sm text-slate-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus size={12} />
-                    </button>
+                    <div className="flex flex-col items-end gap-1.5">
+                      <div className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (item.cartQuantity === 1) {
+                              removeFromCart(item.id);
+                              setCustomPrices(prev => {
+                                const next = { ...prev };
+                                delete next[item.id];
+                                return next;
+                              });
+                            } else {
+                              updateCartQuantity(item.id, -1);
+                            }
+                          }}
+                          className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-white hover:shadow-sm text-slate-600 transition-all"
+                        >
+                          {item.cartQuantity === 1 ? <Trash2 size={12} className="text-red-500" /> : <Minus size={12} />}
+                        </button>
+                        <span className="text-xs font-bold w-6 text-center text-slate-700">{item.cartQuantity}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updateCartQuantity(item.id, 1);
+                          }}
+                          disabled={item.cartQuantity >= item.quantity}
+                          className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-white hover:shadow-sm text-slate-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+                      <span className="text-sm font-bold text-slate-900">
+                        ₹{(price * item.cartQuantity).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
-                  <span className="text-sm font-bold text-slate-900">
-                    ₹{(price * item.cartQuantity).toLocaleString()}
-                  </span>
                 </div>
-              </div>
               );
             })
           )}
         </div>
 
         {/* Cart Footer */}
-        <div className="p-5 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
+        <div className="p-4 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] shrink-0">
           {cart.length > 0 && (
-            <div className="space-y-3 mb-4">
+            <div className="space-y-2 mb-3">
               <div className="flex justify-between text-sm text-slate-500">
                 <span>Subtotal</span>
                 <span className="font-medium text-slate-700">₹{subtotalAmount.toLocaleString()}</span>
@@ -767,38 +783,38 @@ export const Billing: React.FC = () => {
                 </div>
               )}
 
-              {saleType === "wholesale" && paymentMode === "credit" && (
+              {paymentMode === "credit" && (
                 <div className="flex items-center gap-2 text-xs bg-amber-50 text-amber-700 px-3 py-2 rounded-lg border border-amber-200">
                   <CreditCard size={14} />
                   <span>This will be recorded as credit (pending payment)</span>
                 </div>
               )}
 
-              <div className="pt-3 border-t border-dashed border-slate-200 flex justify-between items-end">
+              <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between items-end">
                 <span className="text-sm font-bold text-slate-800">Total</span>
-                <span className="text-2xl font-bold text-indigo-600 leading-none">₹{totalAmount.toLocaleString()}</span>
+                <span className="text-xl font-bold text-indigo-600 leading-none">₹{totalAmount.toLocaleString()}</span>
               </div>
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             {cart.length > 0 && (
               <button
                 onClick={() => setShowClearConfirm(true)}
                 className="px-3 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 transition-colors"
                 title="Clear Cart"
               >
-                <Trash2 size={20} />
+                <Trash2 size={18} />
               </button>
             )}
             <button
               className={`
-                flex-1 h-12 rounded-xl font-bold text-white shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transition-all
+                flex-1 h-11 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all text-sm
                 ${cart.length === 0 || isCheckingOut || (saleType === "wholesale" && !selectedStoreId)
                   ? 'bg-slate-300 cursor-not-allowed shadow-none'
                   : paymentMode === "credit"
                     ? 'bg-amber-600 hover:bg-amber-700 hover:shadow-xl hover:-translate-y-0.5 shadow-amber-200'
-                    : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-xl hover:-translate-y-0.5'
+                    : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-xl hover:-translate-y-0.5 shadow-indigo-200'
                 }
               `}
               disabled={cart.length === 0 || isCheckingOut || (saleType === "wholesale" && !selectedStoreId)}
@@ -811,11 +827,11 @@ export const Billing: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <CreditCard size={20} />
+                  <CreditCard size={18} />
                   <span>
-                    {saleType === "wholesale" && paymentMode === "credit"
+                    {paymentMode === "credit"
                       ? "Bill on Credit"
-                      : "Checkout"}
+                      : `Checkout`}
                   </span>
                 </>
               )}

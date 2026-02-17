@@ -1,7 +1,6 @@
 import {
     BookOpen,
     CreditCard,
-    DollarSign,
     Edit2,
     IndianRupee,
     MapPin,
@@ -16,6 +15,7 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { creditService } from "../db/creditService";
 import { wholesaleStoreService } from "../db/wholesaleStoreService";
+import { useAuthSession } from "../hooks";
 import {
     CreditInvoiceSummary,
     PaymentMode,
@@ -30,6 +30,7 @@ type Tab = "stores" | "ledger";
 
 export const WholesaleHub: React.FC = () => {
   const toast = useToast();
+  const { session } = useAuthSession();
   const [activeTab, setActiveTab] = useState<Tab>("stores");
 
   return (
@@ -71,7 +72,7 @@ export const WholesaleHub: React.FC = () => {
       {activeTab === "stores" ? (
         <StoreManager toast={toast} />
       ) : (
-        <CreditLedger toast={toast} />
+        <CreditLedger toast={toast} isAdmin={session?.role === "admin"} />
       )}
     </div>
   );
@@ -362,7 +363,7 @@ const StoreManager: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
 // CREDIT LEDGER
 // ============================================
 
-const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast }) => {
+const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boolean }> = ({ toast, isAdmin = false }) => {
   const [stores, setStores] = useState<WholesaleStore[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState<string>("");
   const [ledger, setLedger] = useState<CreditInvoiceSummary[]>([]);
@@ -377,6 +378,9 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
 
   // Payment history modal
   const [historyTarget, setHistoryTarget] = useState<CreditInvoiceSummary | null>(null);
+
+  // Delete payment confirmation
+  const [deletePaymentTarget, setDeletePaymentTarget] = useState<{ paymentId: string; invoiceId: string } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -462,6 +466,41 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
       toast.error("Payment Failed", "Could not record payment");
     } finally {
       setRecordingPayment(false);
+    }
+  };
+
+  const handleResendReceipt = async (summary: CreditInvoiceSummary, payment?: { amount: number; payment_mode: PaymentMode }) => {
+    try {
+      const pendingAmount = summary.outstanding;
+      await sharePaymentReceiptOnWhatsApp({
+        store: summary.store,
+        invoiceNumber: summary.invoice.invoice_number,
+        billAmount: summary.invoice.grand_total,
+        paidAmount: summary.total_paid,
+        pendingAmount,
+        paymentMode: payment?.payment_mode || "cash",
+      });
+      toast.success("Receipt Sent", "Receipt shared via WhatsApp");
+    } catch (error) {
+      console.error("WhatsApp share failed:", error);
+      toast.error("Send Failed", "Could not open WhatsApp");
+    }
+  };
+
+  const handleDeletePayment = async () => {
+    if (!deletePaymentTarget) return;
+    try {
+      await creditService.deletePayment(deletePaymentTarget.paymentId, deletePaymentTarget.invoiceId);
+      toast.success("Payment Deleted", "Payment record has been removed");
+      setDeletePaymentTarget(null);
+      // Refresh history target
+      if (historyTarget) {
+        setHistoryTarget(null);
+      }
+      loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Delete Failed", "Could not delete payment record");
     }
   };
 
@@ -620,6 +659,13 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
                             Record Payment
                           </button>
                         )}
+                        <button
+                          onClick={() => handleResendReceipt(summary)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors flex items-center gap-1"
+                          title="Resend receipt via WhatsApp"
+                        >
+                          Resend
+                        </button>
                         {summary.payments.length > 0 && (
                           <button
                             onClick={() => setHistoryTarget(summary)}
@@ -728,7 +774,6 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
                 onClick={handleRecordPayment}
                 className="flex-1"
                 disabled={recordingPayment}
-                leftIcon={<Send size={16} />}
               >
                 {recordingPayment ? "Recording..." : "Record & Send Receipt"}
               </Button>
@@ -768,7 +813,7 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
                     key={payment.id}
                     className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200"
                   >
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-green-600">₹{payment.amount.toLocaleString()}</p>
                       <p className="text-xs text-slate-500">
                         {new Date(payment.payment_date).toLocaleDateString("en-IN", {
@@ -783,9 +828,27 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
                         <p className="text-xs text-slate-400 mt-0.5">{payment.notes}</p>
                       )}
                     </div>
-                    <Badge variant="neutral" size="sm">
-                      {payment.payment_mode.toUpperCase()}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="neutral" size="sm">
+                        {payment.payment_mode.toUpperCase()}
+                      </Badge>
+                      <button
+                        onClick={() => handleResendReceipt(historyTarget, { amount: payment.amount, payment_mode: payment.payment_mode })}
+                        className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
+                        title="Resend receipt"
+                      >
+                        <Send size={14} />
+                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => setDeletePaymentTarget({ paymentId: payment.id, invoiceId: historyTarget.invoice.id })}
+                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+                          title="Delete payment (Admin)"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -799,6 +862,17 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast> }> = ({ toast 
           </div>
         )}
       </Modal>
+
+      {/* Delete Payment Confirmation */}
+      <ConfirmModal
+        isOpen={!!deletePaymentTarget}
+        onClose={() => setDeletePaymentTarget(null)}
+        onConfirm={handleDeletePayment}
+        title="Delete Payment"
+        message="Are you sure you want to delete this payment record? This will update the invoice's outstanding balance."
+        confirmText="Delete"
+        variant="danger"
+      />
     </div>
   );
 };
