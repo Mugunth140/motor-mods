@@ -369,6 +369,12 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
   const [ledger, setLedger] = useState<CreditInvoiceSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Filters & sorting
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unpaid" | "partial" | "paid">("all");
+  const [paymentFilter, setPaymentFilter] = useState<"all" | PaymentMode>("all");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc" | "pending_desc" | "pending_asc">("date_desc");
+
   // Payment modal
   const [paymentTarget, setPaymentTarget] = useState<CreditInvoiceSummary | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -403,14 +409,50 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
     loadData();
   }, [loadData]);
 
+  const filteredLedger = useMemo(() => {
+    const search = searchQuery.trim().toLowerCase();
+
+    const filtered = ledger.filter((entry) => {
+      const matchesSearch =
+        !search ||
+        entry.store.store_name.toLowerCase().includes(search) ||
+        (entry.invoice.invoice_number || "").toLowerCase().includes(search);
+
+      const matchesStatus = statusFilter === "all" || entry.status === statusFilter;
+      const invoicePaymentMode = entry.invoice.payment_mode ?? "cash";
+      const matchesPayment = paymentFilter === "all" || invoicePaymentMode === paymentFilter;
+
+      return matchesSearch && matchesStatus && matchesPayment;
+    });
+
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case "date_asc":
+          return new Date(a.invoice.date).getTime() - new Date(b.invoice.date).getTime();
+        case "date_desc":
+          return new Date(b.invoice.date).getTime() - new Date(a.invoice.date).getTime();
+        case "amount_asc":
+          return a.invoice.grand_total - b.invoice.grand_total;
+        case "amount_desc":
+          return b.invoice.grand_total - a.invoice.grand_total;
+        case "pending_asc":
+          return a.outstanding - b.outstanding;
+        case "pending_desc":
+          return b.outstanding - a.outstanding;
+      }
+    });
+
+    return filtered;
+  }, [ledger, paymentFilter, searchQuery, sortBy, statusFilter]);
+
   const totalOutstanding = useMemo(
-    () => ledger.reduce((sum, s) => sum + s.outstanding, 0),
-    [ledger]
+    () => filteredLedger.reduce((sum, s) => sum + s.outstanding, 0),
+    [filteredLedger]
   );
 
   const pendingCount = useMemo(
-    () => ledger.filter((s) => s.status !== "paid").length,
-    [ledger]
+    () => filteredLedger.filter((s) => s.status !== "paid").length,
+    [filteredLedger]
   );
 
   const handleRecordPayment = async () => {
@@ -558,14 +600,25 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
             </div>
             <div>
               <p className="text-sm text-slate-500">Total Invoices</p>
-              <p className="text-xl font-bold text-slate-800">{ledger.length}</p>
+              <p className="text-xl font-bold text-slate-800">{filteredLedger.length}</p>
             </div>
           </div>
         </Card>
       </div>
 
       {/* Filter */}
-      <div className="flex items-center gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
+          <Search size={16} className="text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by store or invoice..."
+            className="flex-1 bg-transparent text-sm text-slate-700 outline-none"
+          />
+        </div>
+
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 w-72">
           <Store size={16} className="text-slate-400" />
           <select
@@ -581,6 +634,64 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
             ))}
           </select>
         </div>
+
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
+          <BookOpen size={16} className="text-slate-400" />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as "all" | "unpaid" | "partial" | "paid")}
+            className="flex-1 bg-transparent text-sm text-slate-700 outline-none font-medium"
+          >
+            <option value="all">All Status</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="partial">Partial</option>
+            <option value="paid">Paid</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
+          <CreditCard size={16} className="text-slate-400" />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "amount_desc" | "amount_asc" | "pending_desc" | "pending_asc")}
+            className="flex-1 bg-transparent text-sm text-slate-700 outline-none font-medium"
+          >
+            <option value="date_desc">Sort: Newest</option>
+            <option value="date_asc">Sort: Oldest</option>
+            <option value="amount_desc">Sort: Bill High → Low</option>
+            <option value="amount_asc">Sort: Bill Low → High</option>
+            <option value="pending_desc">Sort: Pending High → Low</option>
+            <option value="pending_asc">Sort: Pending Low → High</option>
+          </select>
+        </div>
+
+        <div className="md:col-span-2 xl:col-span-4 flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
+          <CreditCard size={16} className="text-slate-400" />
+          <select
+            value={paymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value as "all" | PaymentMode)}
+            className="bg-transparent text-sm text-slate-700 outline-none font-medium"
+          >
+            <option value="all">All Payment Modes</option>
+            <option value="cash">Cash</option>
+            <option value="upi">UPI</option>
+            <option value="card">Card</option>
+            <option value="credit">Credit</option>
+          </select>
+          {(searchQuery || statusFilter !== "all" || paymentFilter !== "all" || sortBy !== "date_desc") && (
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setStatusFilter("all");
+                setPaymentFilter("all");
+                setSortBy("date_desc");
+              }}
+              className="ml-auto text-xs font-semibold text-indigo-700 hover:text-indigo-800"
+            >
+              Reset Filters
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Ledger Table */}
@@ -589,6 +700,12 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
           icon={BookOpen}
           title="No wholesale invoices"
           description={selectedStoreId ? "No invoices found for this store" : "Create wholesale invoices from the Billing page"}
+        />
+      ) : filteredLedger.length === 0 ? (
+        <EmptyState
+          icon={BookOpen}
+          title="No matching results"
+          description="Try changing filters or search terms"
         />
       ) : (
         <Card>
@@ -607,7 +724,7 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
                 </tr>
               </thead>
               <tbody>
-                {ledger.map((summary) => (
+                {filteredLedger.map((summary) => (
                   <tr key={summary.invoice.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                     <td className="px-5 py-3">
                       <span className="font-semibold text-sm text-slate-800">
