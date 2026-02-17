@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import { appConfigDir, join } from "@tauri-apps/api/path";
+import { BaseDirectory, mkdir, writeFile } from "@tauri-apps/plugin-fs";
 import { isTauriRuntime } from "../db/runtime";
 import { InvoiceRecord, WholesaleStore } from "../types";
+import { generateInvoicePdfBytes } from "./generatePDF";
 import { getInvoiceFilename, resolveExistingInvoicePdfPath } from "./getInvoicePath";
 
 const normalizeWhatsAppPhone = (phone: string | null) => {
@@ -48,10 +51,23 @@ const buildProfessionalMessage = (invoice: InvoiceRecord): string => {
 
 const toFileUri = (filePath: string) => `file:///${filePath.replace(/\\/g, "/")}`;
 
+const persistInvoicePdfForShare = async (invoice: InvoiceRecord): Promise<string | null> => {
+  if (!isTauriRuntime()) return null;
+
+  const { bytes } = await generateInvoicePdfBytes(invoice);
+  const filename = getInvoiceFilename(invoice.invoice_number);
+  await mkdir("invoices", { baseDir: BaseDirectory.AppConfig, recursive: true });
+  await writeFile(`invoices/${filename}`, bytes, { baseDir: BaseDirectory.AppConfig });
+
+  const configDir = await appConfigDir();
+  return await join(configDir, "invoices", filename);
+};
+
 const openWhatsAppWithInvoiceAttachment = async (
   phone: string,
   message: string,
-  invoiceNumber: string
+  invoiceNumber: string,
+  invoiceForPdf?: InvoiceRecord
 ): Promise<void> => {
   ensureWhatsAppPhone(phone, "Recipient");
 
@@ -66,8 +82,18 @@ const openWhatsAppWithInvoiceAttachment = async (
       const { openUrl, revealItemInDir } = await import("@tauri-apps/plugin-opener");
       let pdfPath: string | null = null;
 
+      if (invoiceForPdf) {
+        try {
+          pdfPath = await persistInvoicePdfForShare(invoiceForPdf);
+        } catch {
+          // Continue; fallback will try existing PDF path.
+        }
+      }
+
       try {
-        pdfPath = await resolveExistingInvoicePdfPath(invoiceNumber);
+        if (!pdfPath) {
+          pdfPath = await resolveExistingInvoicePdfPath(invoiceNumber);
+        }
       } catch {
         // Continue with text-only deep link if PDF path cannot be resolved.
       }
@@ -141,7 +167,7 @@ export const shareInvoiceOnWhatsApp = async (invoice: InvoiceRecord): Promise<vo
   const phone = normalizeWhatsAppPhone(invoice.customer_phone);
   ensureWhatsAppPhone(phone, "Customer");
   const message = buildProfessionalMessage(invoice);
-  await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number);
+  await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number, invoice);
 };
 
 const buildWholesaleMessage = (
@@ -205,7 +231,20 @@ export const shareWholesaleInvoiceOnWhatsApp = async (
   const phone = normalizeWhatsAppPhone(store.contact_number);
   ensureWhatsAppPhone(phone, "Store");
   const message = buildWholesaleMessage(invoice, store, pendingAmount);
-  await openWhatsAppWithInvoiceAttachment(phone, message, invoice.invoice_number);
+  const normalizedPending = Math.max(0, pendingAmount);
+  const invoiceForShare: InvoiceRecord = {
+    ...invoice,
+    status: normalizedPending > 0 ? "pending" : "paid",
+    payment_mode: normalizedPending > 0 ? "credit" : (invoice.payment_mode ?? "cash"),
+    paid_amount: Math.max(0, invoice.grand_total - normalizedPending),
+    outstanding_amount: normalizedPending,
+  };
+  await openWhatsAppWithInvoiceAttachment(
+    phone,
+    message,
+    invoice.invoice_number,
+    invoiceForShare
+  );
 };
 
 export const sharePaymentReceiptOnWhatsApp = async (params: {
@@ -215,8 +254,9 @@ export const sharePaymentReceiptOnWhatsApp = async (params: {
   paidAmount: number;
   pendingAmount: number;
   paymentMode: string;
+  invoice?: InvoiceRecord;
 }): Promise<void> => {
-  const { store, invoiceNumber, billAmount, paidAmount, pendingAmount, paymentMode } = params;
+  const { store, invoiceNumber, billAmount, paidAmount, pendingAmount, paymentMode, invoice } = params;
   const phone = normalizeWhatsAppPhone(store.contact_number);
   ensureWhatsAppPhone(phone, "Store");
 
@@ -244,26 +284,10 @@ export const sharePaymentReceiptOnWhatsApp = async (params: {
     "- MotorMods",
   ];
 
-  const text = encodeURIComponent(lines.join("\n"));
-  const desktopDeepLink = `whatsapp://send?phone=${phone}&text=${text}`;
-  const webFallbackUrl = `https://wa.me/${phone}?text=${text}`;
-
-  if (isTauriRuntime()) {
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      try {
-        await openUrl(desktopDeepLink);
-        return;
-      } catch {
-        await openUrl(webFallbackUrl);
-        return;
-      }
-    } catch {
-      // Fall through.
-    }
-  }
-
-  if (typeof window !== "undefined") {
-    window.open(webFallbackUrl, "_blank");
-  }
+  await openWhatsAppWithInvoiceAttachment(
+    phone,
+    lines.join("\n"),
+    invoiceNumber,
+    invoice
+  );
 };

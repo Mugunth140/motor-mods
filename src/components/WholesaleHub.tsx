@@ -23,7 +23,7 @@ import {
     WholesaleStoreFormData,
     emptyStoreForm
 } from "../types";
-import { sharePaymentReceiptOnWhatsApp } from "../utils/shareWhatsApp";
+import { shareWholesaleInvoiceOnWhatsApp } from "../utils/shareWhatsApp";
 import { Badge, Button, Card, ConfirmModal, EmptyState, Input, Modal, useToast } from "./ui";
 
 type Tab = "stores" | "ledger";
@@ -479,18 +479,15 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
 
       const newPending = paymentTarget.outstanding - amount;
 
-      // Send payment receipt via WhatsApp
+      // Send updated invoice via WhatsApp
       try {
-        await sharePaymentReceiptOnWhatsApp({
-          store: paymentTarget.store,
-          invoiceNumber: paymentTarget.invoice.invoice_number,
-          billAmount: paymentTarget.invoice.grand_total,
-          paidAmount: paymentTarget.total_paid + amount,
-          pendingAmount: newPending,
-          paymentMode,
-        });
+        await shareWholesaleInvoiceOnWhatsApp(
+          paymentTarget.invoice,
+          paymentTarget.store,
+          newPending
+        );
       } catch (whatsappError) {
-        console.error("WhatsApp receipt failed:", whatsappError);
+        console.error("WhatsApp invoice share failed:", whatsappError);
       }
 
       toast.success(
@@ -511,18 +508,11 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
     }
   };
 
-  const handleResendReceipt = async (summary: CreditInvoiceSummary, payment?: { amount: number; payment_mode: PaymentMode }) => {
+  const handleResendReceipt = async (summary: CreditInvoiceSummary) => {
     try {
       const pendingAmount = summary.outstanding;
-      await sharePaymentReceiptOnWhatsApp({
-        store: summary.store,
-        invoiceNumber: summary.invoice.invoice_number,
-        billAmount: summary.invoice.grand_total,
-        paidAmount: summary.total_paid,
-        pendingAmount,
-        paymentMode: payment?.payment_mode || "cash",
-      });
-      toast.success("Receipt Sent", "Receipt shared via WhatsApp");
+      await shareWholesaleInvoiceOnWhatsApp(summary.invoice, summary.store, pendingAmount);
+      toast.success("Invoice Sent", "Invoice shared via WhatsApp with attachment");
     } catch (error) {
       console.error("WhatsApp share failed:", error);
       toast.error("Send Failed", "Could not open WhatsApp");
@@ -779,7 +769,7 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
                         <button
                           onClick={() => handleResendReceipt(summary)}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors flex items-center gap-1"
-                          title="Resend receipt via WhatsApp"
+                          title="Send invoice via WhatsApp"
                         >
                           Resend
                         </button>
@@ -892,7 +882,7 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
                 className="flex-1"
                 disabled={recordingPayment}
               >
-                {recordingPayment ? "Recording..." : "Record & Send Receipt"}
+                {recordingPayment ? "Recording..." : "Record & Send Invoice"}
               </Button>
             </div>
           </div>
@@ -950,9 +940,9 @@ const CreditLedger: React.FC<{ toast: ReturnType<typeof useToast>; isAdmin?: boo
                         {payment.payment_mode.toUpperCase()}
                       </Badge>
                       <button
-                        onClick={() => handleResendReceipt(historyTarget, { amount: payment.amount, payment_mode: payment.payment_mode })}
+                        onClick={() => handleResendReceipt(historyTarget)}
                         className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
-                        title="Resend receipt"
+                        title="Send invoice"
                       >
                         <Send size={14} />
                       </button>
