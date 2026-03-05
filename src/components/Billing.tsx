@@ -23,7 +23,7 @@ import { wholesaleStoreService } from "../db/wholesaleStoreService";
 import { useDebounce, useKeyboardShortcut, useProducts } from "../hooks";
 import { CartItem, InvoiceItem, PaymentMode, Product, SaleType, WholesaleStore } from "../types";
 import { shareInvoiceOnWhatsApp, shareWholesaleInvoiceOnWhatsApp } from "../utils/shareWhatsApp";
-import { Badge, Button, ConfirmModal, useToast } from "./ui";
+import { Button, ConfirmModal, useToast } from "./ui";
 
 interface BillingProps {
   onNavigate?: (tab: string) => void;
