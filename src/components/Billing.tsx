@@ -445,20 +445,16 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
         // Send invoice via WhatsApp after invoice record is saved.
         if (saleType === "wholesale" && selectedStore) {
           const pendingAmount = invoiceStatus === "pending" ? totalAmount : 0;
-          try {
-            await shareWholesaleInvoiceOnWhatsApp(record, selectedStore, pendingAmount);
-          } catch (whatsappError) {
+          void shareWholesaleInvoiceOnWhatsApp(record, selectedStore, pendingAmount).catch((whatsappError) => {
             console.error("WhatsApp share failed:", whatsappError);
             toast.warning("WhatsApp Failed", "Invoice saved but WhatsApp could not be opened");
-          }
+          });
         } else if (saleType === "retail") {
           if (record.customer_phone) {
-            try {
-              await shareInvoiceOnWhatsApp(record);
-            } catch (whatsappError) {
+            void shareInvoiceOnWhatsApp(record).catch((whatsappError) => {
               console.error("WhatsApp share failed:", whatsappError);
               toast.warning("WhatsApp Failed", "Invoice saved but WhatsApp could not be opened");
-            }
+            });
           } else {
             toast.info("WhatsApp Skipped", "Retail invoice saved. Add a customer phone number to share on WhatsApp.");
           }

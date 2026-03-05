@@ -82,20 +82,20 @@ const openWhatsAppWithInvoiceAttachment = async (
       const { openUrl, revealItemInDir } = await import("@tauri-apps/plugin-opener");
       let pdfPath: string | null = null;
 
-      if (invoiceForPdf) {
-        try {
-          pdfPath = await persistInvoicePdfForShare(invoiceForPdf);
-        } catch {
-          // Continue; fallback will try existing PDF path.
-        }
+      try {
+        pdfPath = await resolveExistingInvoicePdfPath(invoiceNumber);
+      } catch {
+        // Continue with generation fallback.
       }
 
-      try {
-        if (!pdfPath) {
-          pdfPath = await resolveExistingInvoicePdfPath(invoiceNumber);
+      if (invoiceForPdf) {
+        try {
+          if (!pdfPath) {
+            pdfPath = await persistInvoicePdfForShare(invoiceForPdf);
+          }
+        } catch {
+          // Continue with text-only deep link fallback.
         }
-      } catch {
-        // Continue with text-only deep link if PDF path cannot be resolved.
       }
 
       if (pdfPath) {

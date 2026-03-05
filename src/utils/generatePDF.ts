@@ -4,6 +4,8 @@ import { settingsService } from "../db/settingsService";
 import { InvoiceRecord } from "../types";
 import { getInvoiceFilename } from "./getInvoicePath";
 
+let logoCache: string | null | undefined;
+
 const formatCurrency = (amount: number): string => {
   return new Intl.NumberFormat("en-IN", {
     minimumFractionDigits: 2,
@@ -24,18 +26,29 @@ const formatInvoiceDate = (isoDate: string): string => {
 };
 
 const loadLogoAsDataUrl = async (): Promise<string | null> => {
+  if (logoCache !== undefined) {
+    return logoCache;
+  }
+
   try {
-    const response = await fetch("/logo.png", { cache: "no-cache" });
-    if (!response.ok) return null;
+    const response = await fetch("/logo.png", { cache: "force-cache" });
+    if (!response.ok) {
+      logoCache = null;
+      return null;
+    }
 
     const blob = await response.blob();
-    return await new Promise<string>((resolve, reject) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = () => reject(new Error("Failed to read logo"));
       reader.readAsDataURL(blob);
     });
+
+    logoCache = dataUrl;
+    return dataUrl;
   } catch {
+    logoCache = null;
     return null;
   }
 };
@@ -87,8 +100,7 @@ const drawFooter = (
 
 export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{ bytes: Uint8Array; filename: string }> => {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const settings = await settingsService.getAll();
-  const logoDataUrl = await loadLogoAsDataUrl();
+  const [settings, logoDataUrl] = await Promise.all([settingsService.getAll(), loadLogoAsDataUrl()]);
 
   const margin = 14;
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -319,6 +331,8 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
         textColor: [100, 116, 139],
         fontStyle: "normal",
         fontSize: 7,
+        halign: "center",
+        valign: "middle",
         lineColor: [203, 213, 225],
         lineWidth: 0.1,
       },
@@ -331,6 +345,12 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
         2: { cellWidth: 16, halign: "center" },
         3: { cellWidth: 30, halign: "right" },
         4: { cellWidth: 30, halign: "right" },
+      },
+      didParseCell: (hookData) => {
+        if (hookData.section === "head") {
+          hookData.cell.styles.halign = "center";
+          hookData.cell.styles.valign = "middle";
+        }
       },
     });
 

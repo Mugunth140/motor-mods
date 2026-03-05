@@ -594,7 +594,8 @@ fn share_whatsapp_with_attachment(deeplink_url: String, pdf_path: String) -> Res
         let escaped_deeplink = deeplink_url.replace('\'', "''");
 
         // Requires STA for clipboard access. It preloads the file into clipboard,
-        // opens WhatsApp chat deeplink, then pastes attachment into composer.
+        // opens WhatsApp chat deeplink, waits for WhatsApp (fast-path if already open),
+        // then pastes attachment into composer.
         let script = format!(
             r#"
 Add-Type -AssemblyName System.Windows.Forms
@@ -604,7 +605,13 @@ $files = New-Object System.Collections.Specialized.StringCollection
 [void]$files.Add($path)
 [System.Windows.Forms.Clipboard]::SetFileDropList($files)
 Start-Process '{1}'
-Start-Sleep -Milliseconds 2200
+$started = Get-Date
+while (((Get-Date) - $started).TotalMilliseconds -lt 5000) {{
+    $wa = Get-Process -Name WhatsApp -ErrorAction SilentlyContinue
+    if ($wa) {{ break }}
+    Start-Sleep -Milliseconds 120
+}}
+Start-Sleep -Milliseconds 350
 [System.Windows.Forms.SendKeys]::SendWait('^v')
 "#,
             escaped_pdf_path, escaped_deeplink
