@@ -112,10 +112,18 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   const storeAddress = settings.store_address?.trim() || "";
   const storeContact = [settings.store_phone, settings.store_email].filter(Boolean).join("  |  ");
 
+  const productItems = invoice.items.filter(i => !i.item_type || i.item_type === 'product');
+  const materialLineItems = invoice.items.filter(i => i.item_type === 'material');
+  const serviceLineItems = invoice.items.filter(i => i.item_type === 'service');
+
   const subtotal = invoice.subtotal > 0
     ? invoice.subtotal
-    : invoice.items.reduce((sum, item) => sum + item.total, 0);
-  const discount = Math.max(0, subtotal - invoice.grand_total);
+    : productItems.reduce((sum, item) => sum + item.total, 0);
+  const discount = invoice.discount_amount !== undefined
+    ? invoice.discount_amount
+    : Math.max(0, subtotal - invoice.grand_total);
+  const materialsSubtotal = materialLineItems.reduce((sum, i) => sum + i.total, 0);
+  const serviceSubtotal = serviceLineItems.reduce((sum, i) => sum + i.total, 0);
   const isCreditSale = invoice.payment_mode === "credit" || invoice.status === "pending";
   const derivedPaid = Math.max(0, Math.min(invoice.grand_total, invoice.paid_amount ?? (isCreditSale ? 0 : invoice.grand_total)));
   const paidAmount = isCreditSale
@@ -230,7 +238,7 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   doc.line(margin, y, pageWidth - margin, y);
   y += 5;
 
-  const tableRows = invoice.items.map((item, index) => [
+  const tableRows = productItems.map((item, index) => [
     String(index + 1),
     item.name || "-",
     String(item.qty),
@@ -276,7 +284,9 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   let blockY = (lastAutoTable?.finalY || y) + 9;
 
   const totalsBoxWidth = 76;
-  const totalsBoxHeight = isWholesale ? 42 : 30;
+  const hasMaterials = materialsSubtotal > 0;
+  const hasService = serviceSubtotal > 0;
+  const totalsBoxHeight = (isWholesale ? 42 : 30) + (hasMaterials ? 6 : 0) + (hasService ? 6 : 0);
   const totalsX = pageWidth - margin - totalsBoxWidth;
 
   if (blockY + totalsBoxHeight > pageHeight - 24) {
@@ -311,6 +321,18 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
   rowY += 6;
   doc.text("Discount", totalsX + 4, rowY);
   doc.text(`- ${asAmount(discount)}`, totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+
+  if (hasMaterials) {
+    rowY += 6;
+    doc.text("Materials", totalsX + 4, rowY);
+    doc.text(asAmount(materialsSubtotal), totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+  }
+
+  if (hasService) {
+    rowY += 6;
+    doc.text("Service Charge", totalsX + 4, rowY);
+    doc.text(asAmount(serviceSubtotal), totalsX + totalsBoxWidth - 4, rowY, { align: "right" });
+  }
 
   rowY += 6;
   if (isWholesale) {

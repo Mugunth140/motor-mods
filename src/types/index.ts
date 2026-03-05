@@ -69,6 +69,7 @@ export interface InvoiceRecordItem {
   qty: number;
   rate: number;
   total: number;
+  item_type?: 'product' | 'material' | 'service';
 }
 
 export interface InvoiceRecord {
@@ -78,6 +79,7 @@ export interface InvoiceRecord {
   customer_name: string | null;
   customer_phone: string | null;
   subtotal: number;
+  discount_amount?: number;
   grand_total: number;
   items: InvoiceRecordItem[];
   status: 'pending' | 'paid';

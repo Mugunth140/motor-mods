@@ -1,4 +1,4 @@
-import { message } from "@tauri-apps/plugin-dialog";
+﻿import { message } from "@tauri-apps/plugin-dialog";
 import { Edit3, Printer, Save, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoiceManagementService } from "../db/invoiceManagementService";
@@ -37,9 +37,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
     await message("Printer not configured", { title: "Print", kind: "warning" });
   };
 
-  const itemsSubtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
-  const subtotal = invoice.subtotal > 0 ? invoice.subtotal : itemsSubtotal;
-  const discountAmount = Math.max(0, subtotal - invoice.grand_total);
+  const productItems = invoice.items.filter(i => !i.item_type || i.item_type === "product");
+  const serviceItems = invoice.items.filter(i => i.item_type === "service");
+  const materialItems = invoice.items.filter(i => i.item_type === "material");
+  const subtotal = invoice.subtotal > 0 ? invoice.subtotal : productItems.reduce((sum, i) => sum + i.total, 0);
+  const discountAmount = invoice.discount_amount !== undefined
+    ? invoice.discount_amount
+    : Math.max(0, subtotal - invoice.grand_total);
+  const materialsTotal = materialItems.reduce((sum, i) => sum + i.total, 0);
+  const serviceTotal = serviceItems.reduce((sum, i) => sum + i.total, 0);
 
   const hasChanges = useMemo(() => {
     const nextName = customerName.trim() || "Walking Customer";
@@ -52,20 +58,16 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
   const validateEditForm = (): boolean => {
     setNameError("");
     setPhoneError("");
-
     const trimmedName = customerName.trim();
     const phoneDigits = customerPhone.replace(/\D/g, "");
-
     if (trimmedName.length > 120) {
       setNameError("Customer name must be 120 characters or less.");
       return false;
     }
-
     if (customerPhone.trim() && (phoneDigits.length < 10 || phoneDigits.length > 15)) {
       setPhoneError("Enter a valid phone number (10 to 15 digits).");
       return false;
     }
-
     return true;
   };
 
@@ -87,7 +89,6 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
       setIsEditing(false);
       return;
     }
-
     try {
       setIsSaving(true);
       const updated = await invoiceManagementService.updateInvoiceCustomerDetails({
@@ -115,7 +116,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
         </div>
       </div>
 
-      <div className="p-5 space-y-5">
+      <div className="p-5 space-y-4">
+        {/* Customer */}
         <div className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 bg-slate-50/40">
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Customer</span>
@@ -125,7 +127,6 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
               </Button>
             )}
           </div>
-
           {isEditing ? (
             <>
               <div>
@@ -139,7 +140,6 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
                 />
                 {nameError && <p className="mt-1 text-xs text-red-500">{nameError}</p>}
               </div>
-
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Phone Number</label>
                 <input
@@ -150,26 +150,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
                 />
                 {phoneError && <p className="mt-1 text-xs text-red-500">{phoneError}</p>}
               </div>
-
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                  isLoading={isSaving}
-                  disabled={!hasChanges || isSaving}
-                  leftIcon={<Save size={14} />}
-                  className="h-9"
-                >
+                <Button size="sm" onClick={handleSave} isLoading={isSaving} disabled={!hasChanges || isSaving} leftIcon={<Save size={14} />} className="h-9">
                   Save Changes
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleEditToggle}
-                  disabled={isSaving}
-                  leftIcon={<X size={14} />}
-                  className="h-9"
-                >
+                <Button variant="secondary" size="sm" onClick={handleEditToggle} disabled={isSaving} leftIcon={<X size={14} />} className="h-9">
                   Cancel
                 </Button>
               </div>
@@ -182,6 +167,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
           )}
         </div>
 
+        {/* Products — main table (full size) */}
         <div className="border border-slate-100 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-slate-50">
@@ -193,30 +179,87 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onInvoiceUpda
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {invoice.items.map((item, idx) => (
+              {productItems.map((item, idx) => (
                 <tr key={`${item.name}-${idx}`}>
                   <td className="p-3 font-medium text-slate-800">{item.name}</td>
                   <td className="p-3 text-center text-slate-600">{item.qty}</td>
-                  <td className="p-3 text-right text-slate-600">{"\u20B9"}{item.rate.toLocaleString("en-IN")}</td>
-                  <td className="p-3 text-right font-semibold text-slate-800">{"\u20B9"}{item.total.toLocaleString("en-IN")}</td>
+                  <td className="p-3 text-right text-slate-600">&#x20B9;{item.rate.toLocaleString("en-IN")}</td>
+                  <td className="p-3 text-right font-semibold text-slate-800">&#x20B9;{item.total.toLocaleString("en-IN")}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
+        {/* Service Charge — simple inline row, no table, comes before materials */}
+        {serviceItems.length > 0 && (
+          <div className="space-y-1">
+            {serviceItems.map((item, idx) => (
+              <div key={`svc-${idx}`} className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 border border-slate-200/80">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 shrink-0">Service</span>
+                  <span className="text-xs text-slate-600 truncate">{item.name}</span>
+                </div>
+                <span className="text-xs font-semibold text-slate-700 shrink-0 ml-3">&#x20B9;{item.total.toLocaleString("en-IN")}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Materials Used — compact sub-table, grey/slate tones, smaller size */}
+        {materialItems.length > 0 && (
+          <div className="rounded-lg border border-slate-200/80 overflow-hidden">
+            <div className="px-3 py-1.5 bg-slate-100/80 border-b border-slate-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Materials Used</span>
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="bg-slate-50/60">
+                  <th className="text-left px-2.5 py-1.5 text-[10px] font-semibold text-slate-400">Item</th>
+                  <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-slate-400">Qty</th>
+                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-slate-400">Rate</th>
+                  <th className="text-right px-2.5 py-1.5 text-[10px] font-semibold text-slate-400">Amt</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {materialItems.map((item, idx) => (
+                  <tr key={`mat-${item.name}-${idx}`}>
+                    <td className="px-2.5 py-1.5 text-[11px] text-slate-600 font-medium">{item.name}</td>
+                    <td className="px-2 py-1.5 text-[11px] text-center text-slate-500">{item.qty}</td>
+                    <td className="px-2 py-1.5 text-[11px] text-right text-slate-500">&#x20B9;{item.rate.toLocaleString("en-IN")}</td>
+                    <td className="px-2.5 py-1.5 text-[11px] text-right text-slate-600 font-semibold">&#x20B9;{item.total.toLocaleString("en-IN")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Totals */}
         <div className="bg-teal-50 border border-teal-100 rounded-xl p-4">
           <div className="flex justify-between text-sm text-teal-900/80">
             <span>Subtotal</span>
-            <span className="font-semibold">{"\u20B9"}{subtotal.toLocaleString("en-IN")}</span>
+            <span className="font-semibold">&#x20B9;{subtotal.toLocaleString("en-IN")}</span>
           </div>
           <div className="mt-2 flex justify-between text-sm text-teal-900/80">
             <span>Discount</span>
-            <span className="font-semibold">- {"\u20B9"}{discountAmount.toLocaleString("en-IN")}</span>
+            <span className="font-semibold">- &#x20B9;{discountAmount.toLocaleString("en-IN")}</span>
           </div>
+          {serviceTotal > 0 && (
+            <div className="mt-2 flex justify-between text-sm text-teal-900/80">
+              <span>Service Charge</span>
+              <span className="font-semibold">&#x20B9;{serviceTotal.toLocaleString("en-IN")}</span>
+            </div>
+          )}
+          {materialsTotal > 0 && (
+            <div className="mt-2 flex justify-between text-sm text-teal-900/80">
+              <span>Materials</span>
+              <span className="font-semibold">&#x20B9;{materialsTotal.toLocaleString("en-IN")}</span>
+            </div>
+          )}
           <div className="mt-2 pt-2 border-t border-teal-200 flex justify-between items-center">
             <span className="font-bold text-teal-900">Grand Total</span>
-            <span className="text-xl font-bold text-teal-600">{"\u20B9"}{invoice.grand_total.toLocaleString("en-IN")}</span>
+            <span className="text-xl font-bold text-teal-600">&#x20B9;{invoice.grand_total.toLocaleString("en-IN")}</span>
           </div>
         </div>
 

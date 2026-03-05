@@ -48,7 +48,7 @@ function AppContent() {
       case "dashboard":
         return <Dashboard onNavigate={setActiveTab} />;
       case "billing":
-        return <Billing />;
+        return <Billing onNavigate={setActiveTab} />;
       case "wholesale":
         return <WholesaleHub />;
       case "stock":
