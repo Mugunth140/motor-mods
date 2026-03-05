@@ -280,8 +280,64 @@ export const generateInvoicePdfBytes = async (invoice: InvoiceRecord): Promise<{
     },
   });
 
-  const lastAutoTable = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
-  let blockY = (lastAutoTable?.finalY || y) + 9;
+  let lastAutoTableRef = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
+
+  if (materialLineItems.length > 0) {
+    const matStartY = (lastAutoTableRef?.finalY || y) + 5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("MATERIALS USED", margin, matStartY);
+
+    const matRows = materialLineItems.map((item, idx) => [
+      String(idx + 1),
+      item.name || "-",
+      String(item.qty),
+      asAmount(item.rate),
+      asAmount(item.total),
+    ]);
+
+    autoTable(doc, {
+      startY: matStartY + 3,
+      head: [["#", "Material / Item", "Qty", "Rate", "Amount"]],
+      body: matRows,
+      theme: "plain",
+      margin: { left: margin, right: margin },
+      tableLineColor: [203, 213, 225],
+      tableLineWidth: 0.1,
+      styles: {
+        font: "helvetica",
+        fontSize: 7.5,
+        cellPadding: { top: 1.8, right: 3, bottom: 1.8, left: 3 },
+        textColor: [71, 85, 105],
+        lineColor: [203, 213, 225],
+        lineWidth: 0.1,
+      },
+      headStyles: {
+        fillColor: [248, 250, 252],
+        textColor: [100, 116, 139],
+        fontStyle: "normal",
+        fontSize: 7,
+        lineColor: [203, 213, 225],
+        lineWidth: 0.1,
+      },
+      alternateRowStyles: {
+        fillColor: [252, 253, 254],
+      },
+      columnStyles: {
+        0: { cellWidth: 10, halign: "center" },
+        1: { cellWidth: 96 },
+        2: { cellWidth: 16, halign: "center" },
+        3: { cellWidth: 30, halign: "right" },
+        4: { cellWidth: 30, halign: "right" },
+      },
+    });
+
+    lastAutoTableRef = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
+  }
+
+  let blockY = (lastAutoTableRef?.finalY || y) + 9;
 
   const totalsBoxWidth = 76;
   const hasMaterials = materialsSubtotal > 0;

@@ -71,8 +71,13 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
 
   // Materials used & service charge (retail only)
   const [materialItems, setMaterialItems] = useState<{ id: string; description: string; qty: string; price: string }[]>([]);
-  const [serviceChargeDesc, setServiceChargeDesc] = useState("");
   const [serviceChargeAmount, setServiceChargeAmount] = useState("");
+
+  // Material history for autocomplete (persisted in localStorage)
+  const [matHistory, setMatHistory] = useState<{ name: string; price: number }[]>([]);
+  const [activeSuggestId, setActiveSuggestId] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<{ name: string; price: number }[]>([]);
+  const suggestRef = useRef<HTMLDivElement>(null);
 
   // Load wholesale stores
   useEffect(() => {
@@ -107,6 +112,25 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Load material history from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("motor_material_history");
+      if (stored) setMatHistory(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Close material suggestion dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (suggestRef.current && !suggestRef.current.contains(e.target as Node)) {
+        setActiveSuggestId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   // Reset cart when switching sale type
   const handleSaleTypeChange = (newType: SaleType) => {
     if (cart.length > 0) {
@@ -124,7 +148,6 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
     setPaymentMode("cash");
     setCustomPrices({});
     setMaterialItems([]);
-    setServiceChargeDesc("");
     setServiceChargeAmount("");
   };
 
@@ -277,7 +300,6 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
     setSelectedStoreId("");
     setCustomPrices({});
     setMaterialItems([]);
-    setServiceChargeDesc("");
     setServiceChargeAmount("");
     setShowClearConfirm(false);
     toast.info("Cart Cleared", "All items have been removed");
@@ -396,9 +418,9 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
                   item_type: 'material' as const,
                 };
               }),
-            ...(serviceChargeDesc.trim() && serviceTotal > 0
+            ...(serviceTotal > 0
               ? [{
-                  name: serviceChargeDesc.trim(),
+                  name: "Service Charge",
                   qty: 1,
                   rate: serviceTotal,
                   total: serviceTotal,
@@ -459,8 +481,22 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
       setDiscount("");
       setPaymentMode("cash");
       setCustomPrices({});
+      // Save used materials to history for autocomplete
+      const usedMats = materialItems.filter(m => m.description.trim() && parseFloat(m.price) > 0);
+      if (usedMats.length > 0) {
+        const stored = localStorage.getItem("motor_material_history");
+        const existing: { name: string; price: number }[] = stored ? JSON.parse(stored) : [];
+        const updated = [...existing];
+        for (const mat of usedMats) {
+          const idx = updated.findIndex(h => h.name.toLowerCase() === mat.description.trim().toLowerCase());
+          if (idx >= 0) { updated[idx].price = parseFloat(mat.price); }
+          else { updated.push({ name: mat.description.trim(), price: parseFloat(mat.price) }); }
+        }
+        localStorage.setItem("motor_material_history", JSON.stringify(updated));
+        setMatHistory(updated);
+      }
+
       setMaterialItems([]);
-      setServiceChargeDesc("");
       setServiceChargeAmount("");
       setIsCheckingOut(false);
 
@@ -808,26 +844,14 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
                 {/* Service Charge row */}
                 <div>
                   <label className="text-xs font-semibold text-slate-600 block mb-2">Service Charge</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="e.g. Headlight fitting"
-                      value={serviceChargeDesc}
-                      onChange={(e) => setServiceChargeDesc(e.target.value)}
-                      className="flex-1 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 text-slate-800 placeholder:text-slate-400 transition-all"
+                  <input
+                      type="number"
+                      placeholder="Enter amount"
+                      min="0"
+                      value={serviceChargeAmount}
+                      onChange={(e) => setServiceChargeAmount(e.target.value)}
+                      className="w-full max-w-[180px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 text-slate-800 placeholder:text-slate-400 transition-all"
                     />
-                    <div className="flex items-center border border-slate-200 rounded-lg bg-white focus-within:ring-1 focus-within:ring-indigo-400 focus-within:border-indigo-400 transition-all overflow-hidden">
-                      <span className="pl-2.5 text-sm text-slate-400">{"\u20B9"}</span>
-                      <input
-                        type="number"
-                        placeholder="0"
-                        min="0"
-                        value={serviceChargeAmount}
-                        onChange={(e) => setServiceChargeAmount(e.target.value)}
-                        className="w-24 pr-3 py-2 text-sm bg-transparent outline-none text-right text-slate-800 placeholder:text-slate-400"
-                      />
-                    </div>
-                  </div>
                 </div>
 
                 {/* Materials Used */}
@@ -855,13 +879,65 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
                       </div>
                       {materialItems.map((mat) => (
                         <div key={mat.id} className="grid grid-cols-[1fr_60px_96px_32px] gap-1.5 items-center">
-                          <input
-                            type="text"
-                            placeholder="e.g. Wire 2m"
-                            value={mat.description}
-                            onChange={(e) => setMaterialItems(prev => prev.map(m => m.id === mat.id ? { ...m, description: e.target.value } : m))}
-                            className="px-2.5 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-300 text-slate-800 placeholder:text-slate-400 transition-all"
-                          />
+                          <div className="relative" ref={activeSuggestId === mat.id ? suggestRef : null}>
+                            <input
+                              type="text"
+                              placeholder="e.g. Wire 2m"
+                              value={mat.description}
+                              autoComplete="off"
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setMaterialItems(prev => prev.map(m => m.id === mat.id ? { ...m, description: val } : m));
+                                if (val.trim().length > 0) {
+                                  const filtered = matHistory.filter(h =>
+                                    h.name.toLowerCase().includes(val.toLowerCase())
+                                  );
+                                  setSuggestions(filtered);
+                                  setActiveSuggestId(filtered.length > 0 ? mat.id : null);
+                                } else {
+                                  setSuggestions([]);
+                                  setActiveSuggestId(null);
+                                }
+                              }}
+                              onFocus={() => {
+                                if (mat.description.trim().length > 0) {
+                                  const filtered = matHistory.filter(h =>
+                                    h.name.toLowerCase().includes(mat.description.toLowerCase())
+                                  );
+                                  if (filtered.length > 0) {
+                                    setSuggestions(filtered);
+                                    setActiveSuggestId(mat.id);
+                                  }
+                                } else if (matHistory.length > 0) {
+                                  setSuggestions(matHistory.slice(0, 8));
+                                  setActiveSuggestId(mat.id);
+                                }
+                              }}
+                              className="w-full px-2.5 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-300 text-slate-800 placeholder:text-slate-400 transition-all"
+                            />
+                            {activeSuggestId === mat.id && suggestions.length > 0 && (
+                              <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-md overflow-hidden">
+                                {suggestions.map((s) => (
+                                  <button
+                                    key={s.name}
+                                    type="button"
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      setMaterialItems(prev => prev.map(m =>
+                                        m.id === mat.id ? { ...m, description: s.name, price: String(s.price) } : m
+                                      ));
+                                      setActiveSuggestId(null);
+                                      setSuggestions([]);
+                                    }}
+                                    className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-indigo-50 text-left"
+                                  >
+                                    <span className="text-slate-700 truncate">{s.name}</span>
+                                    <span className="text-xs text-slate-400 ml-2 shrink-0">{"\u20B9"}{s.price.toLocaleString()}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                           <input
                             type="number"
                             placeholder="1"
@@ -870,17 +946,14 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
                             onChange={(e) => setMaterialItems(prev => prev.map(m => m.id === mat.id ? { ...m, qty: e.target.value } : m))}
                             className="px-2 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-300 text-center text-slate-800 transition-all"
                           />
-                          <div className="flex items-center border border-slate-200 rounded-lg bg-white focus-within:ring-1 focus-within:ring-indigo-300 transition-all overflow-hidden">
-                            <span className="pl-2 text-sm text-slate-400">{"\u20B9"}</span>
-                            <input
+                          <input
                               type="number"
-                              placeholder="0"
+                              placeholder="Price"
                               min="0"
                               value={mat.price}
                               onChange={(e) => setMaterialItems(prev => prev.map(m => m.id === mat.id ? { ...m, price: e.target.value } : m))}
-                              className="flex-1 pr-2 py-2 text-sm bg-transparent outline-none text-right text-slate-800 placeholder:text-slate-400"
+                              className="w-full px-2.5 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-300 text-slate-800 placeholder:text-slate-400 transition-all"
                             />
-                          </div>
                           <button
                             onClick={() => setMaterialItems(prev => prev.filter(m => m.id !== mat.id))}
                             className="flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
