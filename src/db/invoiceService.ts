@@ -52,7 +52,13 @@ const saveInvoiceItems = (items: InvoiceItem[]) => {
 };
 
 export const invoiceService = {
-  async createInvoice(invoice: Invoice, items: Omit<InvoiceItem, "invoice_id">[]): Promise<void> {
+  async createInvoice(
+    invoice: Invoice,
+    items: Omit<InvoiceItem, "invoice_id">[],
+    options?: { skipStockValidationItemIds?: string[] }
+  ): Promise<void> {
+    const skipValidationSet = new Set(options?.skipStockValidationItemIds ?? []);
+
     if (!isTauriRuntime()) {
       const invoices = loadInvoices();
       const invoiceItems = loadInvoiceItems();
@@ -61,6 +67,10 @@ export const invoiceService = {
       const products = await productService.getAll();
       const byId = new Map(products.map((p) => [p.id, p] as const));
       for (const item of items) {
+        if (skipValidationSet.has(item.id)) {
+          continue;
+        }
+
         const p = byId.get(item.product_id);
         const available = p?.quantity ?? 0;
         if (available < item.quantity) {
@@ -94,16 +104,24 @@ export const invoiceService = {
         if (itemIdx >= 0) invoiceItems[itemIdx] = nextItem;
         else invoiceItems.push(nextItem);
 
-        // Deduct stock and log adjustment
-        await productService.updateQuantity(item.product_id, -item.quantity);
+        const isManualBilled = skipValidationSet.has(item.id);
+
+        // Deduct stock only for regular inventory-tracked items.
+        if (!isManualBilled) {
+          await productService.updateQuantity(item.product_id, -item.quantity);
+        }
+
         await productService.updateLastSaleDate(item.product_id);
-        await stockAdjustmentService.create(
-          item.product_id,
-          'sale',
-          -item.quantity,
-          `Invoice ${invoice.id.slice(0, 8).toUpperCase()}`,
-          'system'
-        );
+
+        if (!isManualBilled) {
+          await stockAdjustmentService.create(
+            item.product_id,
+            'sale',
+            -item.quantity,
+            `Invoice ${invoice.id.slice(0, 8).toUpperCase()}`,
+            'system'
+          );
+        }
       }
 
       saveInvoices(invoices);
@@ -116,6 +134,11 @@ export const invoiceService = {
     // Stock validation (desktop)
     const productCosts = new Map<string, number>();
     for (const item of items) {
+      if (skipValidationSet.has(item.id)) {
+        productCosts.set(item.product_id, item.cost_price ?? 0);
+        continue;
+      }
+
       const rows = await db.select<{ quantity: number; name: string; purchase_price: number }[]>(
         "SELECT quantity, name, purchase_price FROM products WHERE id = $1",
         [item.product_id]
@@ -145,16 +168,24 @@ export const invoiceService = {
         [item.id, invoice.id, item.product_id, item.quantity, item.price, costPrice]
       );
 
-      // Deduct stock and log adjustment
-      await productService.updateQuantity(item.product_id, -item.quantity);
+      const isManualBilled = skipValidationSet.has(item.id);
+
+      // Deduct stock only for regular inventory-tracked items.
+      if (!isManualBilled) {
+        await productService.updateQuantity(item.product_id, -item.quantity);
+      }
+
       await productService.updateLastSaleDate(item.product_id);
-      await stockAdjustmentService.create(
-        item.product_id,
-        'sale',
-        -item.quantity,
-        `Invoice ${invoice.id.slice(0, 8).toUpperCase()}`,
-        'system'
-      );
+
+      if (!isManualBilled) {
+        await stockAdjustmentService.create(
+          item.product_id,
+          'sale',
+          -item.quantity,
+          `Invoice ${invoice.id.slice(0, 8).toUpperCase()}`,
+          'system'
+        );
+      }
     }
   },
 

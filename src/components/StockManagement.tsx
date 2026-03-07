@@ -349,8 +349,19 @@ export const StockManagement: React.FC<StockManagementProps> = ({ canEdit = fals
       setDeleteConfirm({ open: false, product: null });
       refetch();
     } catch (error) {
-      console.error(error);
-      toast.error("Delete Failed", "Could not delete the product. It may be referenced in invoices.");
+      const message = error instanceof Error ? error.message : String(error);
+      const isReferenceError = /cannot be deleted|referenced|foreign key|constraint failed|code:\s*787/i.test(message);
+
+      if (!isReferenceError) {
+        console.error(error);
+      }
+
+      toast.error(
+        "Delete Failed",
+        isReferenceError
+          ? "This product is linked to invoices/returns. Keep it and set stock to 0 if needed."
+          : (message || "Could not delete the product. Please try again.")
+      );
     } finally {
       setIsDeleting(false);
     }

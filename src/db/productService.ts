@@ -141,7 +141,15 @@ export const productService = {
       return;
     }
     const db = await getDb();
-    await db.execute("DELETE FROM products WHERE id = $1", [id]);
+    try {
+      await db.execute("DELETE FROM products WHERE id = $1", [id]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/foreign key|constraint failed|code:\s*787/i.test(message)) {
+        throw new Error("This product is used in invoices or returns and cannot be deleted.");
+      }
+      throw error;
+    }
 
     // Delete from Firestore (fire and forget)
     deleteProductFromFirestore(id).catch(console.error);

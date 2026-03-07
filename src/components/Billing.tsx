@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { v4 as uuidv4 } from "uuid";
 import { invoiceManagementService } from "../db/invoiceManagementService";
 import { invoiceService } from "../db/invoiceService";
+import { productService } from "../db/productService";
 import { wholesaleStoreService } from "../db/wholesaleStoreService";
 import { useDebounce, useKeyboardShortcut, useProducts } from "../hooks";
 import { CartItem, InvoiceItem, PaymentMode, Product, SaleType, WholesaleStore } from "../types";
@@ -28,6 +29,25 @@ import { Button, ConfirmModal, useToast } from "./ui";
 interface BillingProps {
   onNavigate?: (tab: string) => void;
 }
+
+type BillingCartItem = CartItem & {
+  isManualEntry?: boolean;
+};
+
+const BILLING_DRAFT_KEY = "motormods_billing_draft_v1";
+
+type BillingDraft = {
+  saleType: SaleType;
+  selectedStoreId: string;
+  cart: BillingCartItem[];
+  customerName: string;
+  customerPhone: string;
+  discount: string;
+  paymentMode: PaymentMode;
+  customPrices: Record<string, number>;
+  materialItems: { id: string; description: string; qty: string; price: string }[];
+  serviceChargeAmount: string;
+};
 
 export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
   const { products, loading, refetch } = useProducts();
@@ -42,7 +62,7 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
   const [selectedStoreId, setSelectedStoreId] = useState<string>("");
 
   // Cart state
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<BillingCartItem[]>([]);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [discount, setDiscount] = useState("");
@@ -56,6 +76,15 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
   // Quick add quantity modal
   const [quickAddProduct, setQuickAddProduct] = useState<Product | null>(null);
   const [quickAddQty, setQuickAddQty] = useState("1");
+
+  // Manual item modal (for billing products not yet in inventory)
+  const [showManualItemModal, setShowManualItemModal] = useState(false);
+  const [manualItemName, setManualItemName] = useState("");
+  const [manualItemSku, setManualItemSku] = useState("");
+  const [manualItemCategory, setManualItemCategory] = useState("");
+  const [manualItemPrice, setManualItemPrice] = useState("");
+  const [manualItemCostPrice, setManualItemCostPrice] = useState("");
+  const [manualItemQty, setManualItemQty] = useState("1");
 
   // Clear cart confirmation
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -78,6 +107,165 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
   const [activeSuggestId, setActiveSuggestId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<{ name: string; price: number }[]>([]);
   const suggestRef = useRef<HTMLDivElement>(null);
+
+  const clearBillingDraft = useCallback(() => {
+    localStorage.removeItem(BILLING_DRAFT_KEY);
+  }, []);
+
+  // Restore draft when Billing mounts (e.g. after navigating away and back).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BILLING_DRAFT_KEY);
+      if (!raw) return;
+
+      const draft = JSON.parse(raw) as Partial<BillingDraft>;
+      let restoredSomething = false;
+
+      if (draft.saleType === "retail" || draft.saleType === "wholesale") {
+        setSaleType(draft.saleType);
+        restoredSomething = true;
+      }
+      if (typeof draft.selectedStoreId === "string") {
+        setSelectedStoreId(draft.selectedStoreId);
+        restoredSomething = restoredSomething || draft.selectedStoreId.trim().length > 0;
+      }
+      if (Array.isArray(draft.cart)) {
+        const sanitizedCart = draft.cart
+          .filter((item) => item && typeof item.id === "string" && typeof item.name === "string")
+          .map((item) => ({
+            ...item,
+            cartQuantity: Math.max(1, Number(item.cartQuantity) || 1),
+          }));
+        setCart(sanitizedCart);
+        restoredSomething = restoredSomething || sanitizedCart.length > 0;
+      }
+      if (typeof draft.customerName === "string") {
+        setCustomerName(draft.customerName);
+        restoredSomething = restoredSomething || draft.customerName.trim().length > 0;
+      }
+      if (typeof draft.customerPhone === "string") {
+        setCustomerPhone(draft.customerPhone);
+        restoredSomething = restoredSomething || draft.customerPhone.trim().length > 0;
+      }
+      if (typeof draft.discount === "string") {
+        setDiscount(draft.discount);
+        restoredSomething = restoredSomething || draft.discount.trim().length > 0;
+      }
+      if (
+        draft.paymentMode === "cash" ||
+        draft.paymentMode === "card" ||
+        draft.paymentMode === "upi" ||
+        draft.paymentMode === "cheque" ||
+        draft.paymentMode === "credit"
+      ) {
+        setPaymentMode(draft.paymentMode);
+      }
+      if (draft.customPrices && typeof draft.customPrices === "object") {
+        setCustomPrices(draft.customPrices);
+        restoredSomething = restoredSomething || Object.keys(draft.customPrices).length > 0;
+      }
+      if (Array.isArray(draft.materialItems)) {
+        setMaterialItems(draft.materialItems);
+        restoredSomething = restoredSomething || draft.materialItems.length > 0;
+      }
+      if (typeof draft.serviceChargeAmount === "string") {
+        setServiceChargeAmount(draft.serviceChargeAmount);
+        restoredSomething = restoredSomething || draft.serviceChargeAmount.trim().length > 0;
+      }
+
+      if (restoredSomething) {
+        toast.info("Draft Restored", "Recovered your previous billing cart and details");
+      }
+    } catch {
+      // Ignore malformed draft and continue with fresh state.
+    }
+  }, []);
+
+  // Keep cart/product snapshots fresh after products load/refetch.
+  useEffect(() => {
+    if (products.length === 0) return;
+
+    setCart((prev) => {
+      let changed = false;
+
+      const next = prev.map((item) => {
+        if (item.isManualEntry) return item;
+        const latest = products.find((p) => p.id === item.id);
+        if (!latest) return item;
+
+        const normalizedQty = Math.max(1, Number(item.cartQuantity) || 1);
+        const isSame =
+          item.name === latest.name &&
+          item.sku === latest.sku &&
+          item.category === latest.category &&
+          item.price === latest.price &&
+          item.quantity === latest.quantity &&
+          item.purchase_price === latest.purchase_price &&
+          item.reorder_level === latest.reorder_level &&
+          item.updated_at === latest.updated_at &&
+          item.cartQuantity === normalizedQty &&
+          item.isManualEntry === false;
+
+        if (isSame) {
+          return item;
+        }
+
+        changed = true;
+        return {
+          ...latest,
+          cartQuantity: normalizedQty,
+          isManualEntry: false,
+        };
+      });
+
+      return changed ? next : prev;
+    });
+  }, [products]);
+
+  // Persist billing draft so navigation does not clear in-progress bill.
+  useEffect(() => {
+    const hasDraftData =
+      cart.length > 0 ||
+      customerName.trim().length > 0 ||
+      customerPhone.trim().length > 0 ||
+      discount.trim().length > 0 ||
+      materialItems.length > 0 ||
+      serviceChargeAmount.trim().length > 0 ||
+      Object.keys(customPrices).length > 0 ||
+      selectedStoreId.trim().length > 0;
+
+    if (!hasDraftData) {
+      clearBillingDraft();
+      return;
+    }
+
+    const draft: BillingDraft = {
+      saleType,
+      selectedStoreId,
+      cart,
+      customerName,
+      customerPhone,
+      discount,
+      paymentMode,
+      customPrices,
+      materialItems,
+      serviceChargeAmount,
+    };
+
+    localStorage.setItem(BILLING_DRAFT_KEY, JSON.stringify(draft));
+  }, [
+    saleType,
+    selectedStoreId,
+    cart,
+    customerName,
+    customerPhone,
+    discount,
+    paymentMode,
+    customPrices,
+    materialItems,
+    serviceChargeAmount,
+    clearBillingDraft,
+  ]);
 
   // Load wholesale stores
   useEffect(() => {
@@ -157,7 +345,7 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
   );
 
   const getProductPrice = useCallback(
-    (product: Product | CartItem) => {
+    (product: Product | BillingCartItem) => {
       // For wholesale, check if biller has set a custom price
       if (saleType === "wholesale" && customPrices[product.id] !== undefined) {
         return customPrices[product.id];
@@ -255,7 +443,7 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
         if (item.id === productId) {
           const newQty = item.cartQuantity + delta;
           if (newQty <= 0) return item;
-          if (newQty > item.quantity) {
+          if (!item.isManualEntry && newQty > item.quantity) {
             toast.warning("Insufficient Stock", `Only ${item.quantity} units available`);
             return item;
           }
@@ -291,6 +479,65 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
     }
   };
 
+  const resetManualItemForm = () => {
+    setManualItemName("");
+    setManualItemSku("");
+    setManualItemCategory("");
+    setManualItemPrice("");
+    setManualItemCostPrice("");
+    setManualItemQty("1");
+  };
+
+  const handleAddManualItem = () => {
+    const name = manualItemName.trim();
+    const sku = manualItemSku.trim();
+    const category = manualItemCategory.trim();
+    const price = Number.parseFloat(manualItemPrice);
+    const parsedCostPrice = Number.parseFloat(manualItemCostPrice);
+    const costPrice = Number.isFinite(parsedCostPrice) ? parsedCostPrice : 0;
+    const qty = Number.parseInt(manualItemQty, 10);
+
+    if (!name) {
+      toast.warning("Missing Name", "Enter a product name for the manual item");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      toast.warning("Invalid Price", "Enter a valid selling price");
+      return;
+    }
+    if (costPrice < 0) {
+      toast.warning("Invalid Cost", "Cost price cannot be negative");
+      return;
+    }
+    if (!Number.isInteger(qty) || qty <= 0) {
+      toast.warning("Invalid Quantity", "Quantity must be at least 1");
+      return;
+    }
+
+    const manualItem: BillingCartItem = {
+      id: `manual-${uuidv4()}`,
+      name,
+      sku: sku || null,
+      category: category || "Manual Entry",
+      price,
+      quantity: Number.MAX_SAFE_INTEGER,
+      barcode: null,
+      purchase_price: costPrice,
+      reorder_level: 0,
+      max_stock: null,
+      last_sale_date: null,
+      fsn_classification: null,
+      updated_at: new Date().toISOString(),
+      cartQuantity: qty,
+      isManualEntry: true,
+    };
+
+    setCart((prev) => [...prev, manualItem]);
+    setShowManualItemModal(false);
+    resetManualItemForm();
+    toast.success("Manual Item Added", `${name} added to cart`);
+  };
+
   const clearCart = () => {
     setCart([]);
     setCustomerName("");
@@ -302,6 +549,9 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
     setMaterialItems([]);
     setServiceChargeAmount("");
     setShowClearConfirm(false);
+    resetManualItemForm();
+    setShowManualItemModal(false);
+    clearBillingDraft();
     toast.info("Cart Cleared", "All items have been removed");
   };
 
@@ -330,10 +580,15 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
 
     setIsCheckingOut(true);
     const invoiceId = uuidv4();
+    let workingCart: BillingCartItem[] = [...cart];
 
     // Extra safety: re-check stock at checkout time (service also enforces this).
     const productsById = new Map(products.map((p) => [p.id, p] as const));
-    for (const item of cart) {
+    for (const item of workingCart) {
+      if (item.isManualEntry) {
+        continue;
+      }
+
       const product = productsById.get(item.id);
       if (!product) {
         toast.error("Checkout Failed", `Product not found: ${item.name}`);
@@ -350,13 +605,107 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
       }
     }
 
-    const invoiceItems: Omit<InvoiceItem, "invoice_id">[] = cart.map((item) => ({
-      id: uuidv4(),
-      product_id: item.id,
-      quantity: item.cartQuantity,
-      price: getProductPrice(item),
-      cost_price: item.purchase_price ?? 0,
-    }));
+    const manualItems = workingCart.filter((item) => item.isManualEntry);
+    if (manualItems.length > 0) {
+      const skuLookup = new Map(
+        products
+          .filter((p) => p.sku)
+          .map((p) => [String(p.sku).trim().toLowerCase(), p] as const)
+      );
+      const nameLookup = new Map(products.map((p) => [p.name.trim().toLowerCase(), p] as const));
+      const manualIdMap = new Map<string, Product>();
+
+      try {
+        for (const item of manualItems) {
+          const normalizedSku = item.sku?.trim().toLowerCase() || "";
+          const normalizedName = item.name.trim().toLowerCase();
+          const existing = normalizedSku ? skuLookup.get(normalizedSku) : nameLookup.get(normalizedName);
+
+          if (existing) {
+            manualIdMap.set(item.id, existing);
+            continue;
+          }
+
+          const newProductId = uuidv4();
+          await productService.add({
+            id: newProductId,
+            name: item.name,
+            sku: item.sku,
+            category: item.category,
+            price: item.price,
+            quantity: 0,
+            barcode: null,
+            purchase_price: item.purchase_price ?? 0,
+            reorder_level: 0,
+            max_stock: null,
+            last_sale_date: null,
+            fsn_classification: null,
+          });
+
+          const addedProduct: Product = {
+            id: newProductId,
+            name: item.name,
+            sku: item.sku,
+            category: item.category,
+            price: item.price,
+            quantity: 0,
+            barcode: null,
+            purchase_price: item.purchase_price ?? 0,
+            reorder_level: 0,
+            max_stock: null,
+            last_sale_date: null,
+            fsn_classification: null,
+            updated_at: new Date().toISOString(),
+          };
+
+          manualIdMap.set(item.id, addedProduct);
+          if (normalizedSku) {
+            skuLookup.set(normalizedSku, addedProduct);
+          }
+          nameLookup.set(normalizedName, addedProduct);
+        }
+
+        workingCart = workingCart.map((item) => {
+          if (!item.isManualEntry) {
+            return item;
+          }
+          const mapped = manualIdMap.get(item.id);
+          if (!mapped) {
+            return item;
+          }
+          return {
+            ...item,
+            id: mapped.id,
+            sku: mapped.sku,
+            category: mapped.category,
+            price: mapped.price,
+            quantity: mapped.quantity,
+            purchase_price: mapped.purchase_price,
+          };
+        });
+      } catch (manualPersistError) {
+        console.error(manualPersistError);
+        toast.error("Checkout Failed", "Could not save manual items to inventory");
+        setIsCheckingOut(false);
+        return;
+      }
+    }
+
+    const skipStockValidationItemIds: string[] = [];
+    const invoiceItems: Omit<InvoiceItem, "invoice_id">[] = workingCart.map((item) => {
+      const invoiceItemId = uuidv4();
+      if (item.isManualEntry) {
+        skipStockValidationItemIds.push(invoiceItemId);
+      }
+
+      return {
+        id: invoiceItemId,
+        product_id: item.id,
+        quantity: item.cartQuantity,
+        price: getProductPrice(item),
+        cost_price: item.purchase_price ?? 0,
+      };
+    });
 
     const invoiceStatus: "pending" | "paid" =
       saleType === "wholesale" && paymentMode === "credit" ? "pending" : "paid";
@@ -385,7 +734,8 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
           payment_mode: paymentMode,
           created_at: new Date().toISOString(),
         },
-        invoiceItems
+        invoiceItems,
+        { skipStockValidationItemIds }
       );
 
       let invoiceNumberLabel = invoiceId.slice(0, 8).toUpperCase();
@@ -495,6 +845,7 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
       setMaterialItems([]);
       setServiceChargeAmount("");
       setIsCheckingOut(false);
+      clearBillingDraft();
 
       // Refresh product quantities
       refetch();
@@ -693,6 +1044,14 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
         </div>
 
         {/* All Products Button */}
+        <button
+          onClick={() => setShowManualItemModal(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all shadow-sm shrink-0"
+        >
+          <Plus size={16} />
+          Manual Item
+        </button>
+
         {onNavigate && (
           <button
             onClick={() => onNavigate("stock")}
@@ -813,7 +1172,7 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
                               e.stopPropagation();
                               updateCartQuantity(item.id, 1);
                             }}
-                            disabled={item.cartQuantity >= item.quantity}
+                            disabled={!item.isManualEntry && item.cartQuantity >= item.quantity}
                             className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-white hover:shadow-sm text-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <Plus size={13} />
@@ -1208,6 +1567,115 @@ export const Billing: React.FC<BillingProps> = ({ onNavigate }) => {
                 Cancel
               </Button>
               <Button onClick={handleQuickAdd} className="flex-1 h-12 rounded-xl bg-indigo-600 hover:bg-indigo-700" leftIcon={<Check size={18} />}>
+                Add to Cart
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Item Modal */}
+      {showManualItemModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+            onClick={() => {
+              setShowManualItemModal(false);
+              resetManualItemForm();
+            }}
+          />
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-slate-800">Add Manual Item</h3>
+            <p className="text-sm text-slate-500 mt-1">Bill a product that is not currently in inventory.</p>
+
+            <div className="mt-5 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Product Name *</label>
+                <input
+                  type="text"
+                  value={manualItemName}
+                  onChange={(e) => setManualItemName(e.target.value)}
+                  placeholder="Enter product name"
+                  className="mt-1 w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600">SKU (optional)</label>
+                  <input
+                    type="text"
+                    value={manualItemSku}
+                    onChange={(e) => setManualItemSku(e.target.value)}
+                    placeholder="SKU"
+                    className="mt-1 w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600">Category (optional)</label>
+                  <input
+                    type="text"
+                    value={manualItemCategory}
+                    onChange={(e) => setManualItemCategory(e.target.value)}
+                    placeholder="Category"
+                    className="mt-1 w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600">Quantity *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={manualItemQty}
+                    onChange={(e) => setManualItemQty(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600">Unit Price *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={manualItemPrice}
+                    onChange={(e) => setManualItemPrice(e.target.value)}
+                    placeholder="0.00"
+                    className="mt-1 w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Cost Price (for profit)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualItemCostPrice}
+                  onChange={(e) => setManualItemCostPrice(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1 w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Leave empty to treat cost as 0.</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowManualItemModal(false);
+                  resetManualItemForm();
+                }}
+                className="flex-1 h-11 rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleAddManualItem} className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700">
                 Add to Cart
               </Button>
             </div>
